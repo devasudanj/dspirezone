@@ -127,6 +127,15 @@ def seed():
                 price=1000.0,
                 sort_order=7,
             ),
+            dict(
+                name="Valet Parking Service",
+                description="Up to 15 cars can be parked. Charged at Rs. 1500/hr for the full event duration.",
+                type=ItemType.service_addon,
+                price_type=PriceType.per_hour,
+                unit_label="hour",
+                price=1500.0,
+                sort_order=8,
+            ),
         ]
 
         # ----------------------------------------------------------------

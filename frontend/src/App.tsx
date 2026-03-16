@@ -10,6 +10,8 @@ const BookingFlow = lazy(() => import("./pages/BookingFlow"));
 const Gallery = lazy(() => import("./pages/Gallery"));
 const Packages = lazy(() => import("./pages/Packages"));
 const Contact = lazy(() => import("./pages/Contact"));
+const Vendors = lazy(() => import("./pages/Vendors"));
+const VendorGuidelines = lazy(() => import("./pages/VendorGuidelines"));
 const Policies = lazy(() => import("./pages/Policies"));
 const Login = lazy(() => import("./pages/Login"));
 const Register = lazy(() => import("./pages/Register"));
@@ -38,6 +40,8 @@ export default function App() {
               <Route path="/gallery" element={<Gallery />} />
               <Route path="/packages" element={<Packages />} />
               <Route path="/contact" element={<Contact />} />
+              <Route path="/vendors" element={<Vendors />} />
+              <Route path="/vendor-guidelines" element={<VendorGuidelines />} />
               <Route path="/policies" element={<Policies />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />

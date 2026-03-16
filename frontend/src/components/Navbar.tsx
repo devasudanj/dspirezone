@@ -35,6 +35,7 @@ import { BRAND } from "../theme";
 const NAV_LINKS = [
   { label: "Home", href: "/" },
   { label: "Book Now", href: "/book" },
+  { label: "Vendors", href: "/vendors" },
   { label: "Packages", href: "/packages" },
   { label: "Gallery", href: "/gallery" },
   { label: "Contact", href: "/contact" },

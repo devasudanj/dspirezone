@@ -12,7 +12,7 @@ import {
 import { useNavigate, Link as RouterLink } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import dayjs, { Dayjs } from "dayjs";
-import { DatePicker, TimePicker } from "@mui/x-date-pickers";
+import { DatePicker } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import api from "../api/client";
@@ -38,6 +38,12 @@ interface BookingState {
   favors: Record<number, number>;  // item_id → quantity
 }
 
+interface GuestDetails {
+  name: string;
+  email: string;
+  phone: string;
+}
+
 const STEPS = [
   "Date & Time",
   "Included Items",
@@ -45,7 +51,9 @@ const STEPS = [
   "Food Court Tables",
   "Extra Rooms",
   "Favors & Essentials",
-  "Confirm & Pay",
+  "Order Review",
+  "Guest Details",
+  "Payment",
 ];
 
 const MotionBox = motion(Box);
@@ -69,9 +77,16 @@ function DateTimeStep({
   availableSlots: AvailableSlot[];
   loadingSlots: boolean;
 }) {
-  const durations = venue
-    ? Array.from({ length: Math.min(10, 12 - (venue.min_hours - 1)) }, (_, i) => venue.min_hours + i)
-    : [2, 3, 4, 5, 6, 7, 8];
+  const minDuration = Math.max(2, venue?.min_hours ?? 2);
+  const durationCount = Math.max(1, Math.min(10, 12 - (minDuration - 1)));
+  const durations = Array.from({ length: durationCount }, (_, i) => minDuration + i);
+
+  const formatWindow = (slot: string) => {
+    if (!state.date) return slot;
+    const start = dayjs(`${state.date.format("YYYY-MM-DD")}T${slot}`);
+    const end = start.add(state.durationHours, "hour");
+    return `${start.format("hh:mm A")} - ${end.format("hh:mm A")}`;
+  };
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
@@ -91,7 +106,7 @@ function DateTimeStep({
             <Select
               value={state.durationHours}
               label="Duration (hours)"
-              onChange={(e) => setState({ durationHours: Number(e.target.value) })}
+              onChange={(e) => setState({ durationHours: Math.max(2, Number(e.target.value)), startTime: null })}
             >
               {durations.map((h) => (
                 <MenuItem key={h} value={h}>{h} {h === 1 ? "hour" : "hours"}</MenuItem>
@@ -120,7 +135,7 @@ function DateTimeStep({
                   return (
                     <Chip
                       key={slot}
-                      label={slot}
+                      label={formatWindow(slot)}
                       color={isSelected ? "secondary" : "default"}
                       variant={isSelected ? "filled" : "outlined"}
                       clickable
@@ -130,6 +145,14 @@ function DateTimeStep({
                 })}
               </Box>
             )}
+          </Grid>
+        )}
+
+        {state.date && state.startTime && (
+          <Grid item xs={12}>
+            <Alert severity="success">
+              Selected time window: {state.startTime.format("hh:mm A")} - {state.startTime.add(state.durationHours, "hour").format("hh:mm A")} ({state.durationHours} hours)
+            </Alert>
           </Grid>
         )}
       </Grid>
@@ -144,7 +167,7 @@ function IncludedItemsStep({ venue }: { venue: Venue | null }) {
     { icon: "🔊", label: "AV System", sub: "Projector, PA system & microphone" },
     { icon: "🪑", label: "Tables & Chairs", sub: "Setup for your guest count" },
     { icon: "❄️", label: "Air Conditioning", sub: "Climate-controlled hall" },
-    { icon: "🚗", label: "Free Parking", sub: "On-site vehicle parking" },
+    { icon: "🚗", label: "Free Self Street Parking", sub: "Self parking is available at site" },
     { icon: "🧹", label: "Post-event Cleanup", sub: "Full cleanup after your event" },
   ];
 
@@ -199,8 +222,12 @@ function ServiceAddonsStep({
   };
 
   return (
-    <Grid container spacing={2}>
-      {catalogItems
+    <>
+      <Alert severity="info" sx={{ mb: 2 }}>
+        Valet parking add-on available: up to 15 cars can be parked for Rs. 1500/hr for your event duration. Free self street parking is also available at site.
+      </Alert>
+      <Grid container spacing={2}>
+        {catalogItems
         .filter((c) => c.type === "service_addon")
         .map((item) => {
           const selected = state.addons.includes(item.id);
@@ -248,7 +275,8 @@ function ServiceAddonsStep({
             </Grid>
           );
         })}
-    </Grid>
+      </Grid>
+    </>
   );
 }
 
@@ -420,21 +448,18 @@ function FavorsStep({
 }
 
 // ─── Step 7 ───────────────────────────────────────────────────────────────────
-function ConfirmStep({
-  state, priceBreakdown, catalogItems, venue, loadingPrice, confirmLoading, onConfirm, error, isLoggedIn,
+function OrderReviewStep({
+  state, priceBreakdown, catalogItems, venue, loadingPrice,
 }: {
   state: BookingState;
   priceBreakdown: PriceBreakdownType | null;
   catalogItems: CatalogItem[];
   venue: Venue | null;
   loadingPrice: boolean;
-  confirmLoading: boolean;
-  onConfirm: () => void;
-  error: string | null;
-  isLoggedIn: boolean;
 }) {
   const formatDate = () => state.date ? state.date.format("DD MMM YYYY") : "";
   const formatTime = () => state.startTime ? state.startTime.format("hh:mm A") : "";
+  const formatEndTime = () => state.startTime ? state.startTime.add(state.durationHours, "hour").format("hh:mm A") : "";
   const selectedAddons = catalogItems.filter((c) => state.addons.includes(c.id));
   const selectedFavors = catalogItems.filter((c) => (state.favors[c.id] ?? 0) > 0);
 
@@ -450,6 +475,10 @@ function ConfirmStep({
           <Box sx={{ display: "flex", justifyContent: "space-between" }}>
             <Typography color="text.secondary">Start Time</Typography>
             <Typography fontWeight={600}>{formatTime()}</Typography>
+          </Box>
+          <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+            <Typography color="text.secondary">End Time</Typography>
+            <Typography fontWeight={600}>{formatEndTime()}</Typography>
           </Box>
           <Box sx={{ display: "flex", justifyContent: "space-between" }}>
             <Typography color="text.secondary">Duration</Typography>
@@ -493,6 +522,10 @@ function ConfirmStep({
       </Grid>
 
       <Grid item xs={12} md={6}>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          To reserve this slot, a <strong>10% advance payment</strong> is required. The remaining amount can be paid later.
+        </Alert>
+
         {loadingPrice ? (
           <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
             <CircularProgress />
@@ -500,68 +533,104 @@ function ConfirmStep({
         ) : priceBreakdown ? (
           <PriceBreakdown breakdown={priceBreakdown} venue={venue} />
         ) : null}
+      </Grid>
+    </Grid>
+  );
+}
 
-        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+function GuestDetailsStep({
+  guestDetails,
+  setGuestDetails,
+}: {
+  guestDetails: GuestDetails;
+  setGuestDetails: (s: GuestDetails) => void;
+}) {
+  return (
+    <Grid container spacing={2}>
+      <Grid item xs={12}>
+        <Alert severity="info">
+          Continue as guest by providing your contact details. We will use these details for reservation communication.
+        </Alert>
+      </Grid>
+      <Grid item xs={12} sm={6}>
+        <TextField
+          fullWidth
+          label="Full Name"
+          value={guestDetails.name}
+          onChange={(e) => setGuestDetails({ ...guestDetails, name: e.target.value })}
+        />
+      </Grid>
+      <Grid item xs={12} sm={6}>
+        <TextField
+          fullWidth
+          type="email"
+          label="Email Address"
+          value={guestDetails.email}
+          onChange={(e) => setGuestDetails({ ...guestDetails, email: e.target.value })}
+        />
+      </Grid>
+      <Grid item xs={12} sm={6}>
+        <TextField
+          fullWidth
+          label="Phone Number"
+          value={guestDetails.phone}
+          onChange={(e) => setGuestDetails({ ...guestDetails, phone: e.target.value })}
+        />
+      </Grid>
+    </Grid>
+  );
+}
 
-        {isLoggedIn ? (
-          <>
-            <Button
-              fullWidth
-              variant="contained"
-              color="secondary"
-              size="large"
-              disabled={confirmLoading || loadingPrice}
-              onClick={onConfirm}
-              startIcon={confirmLoading ? <CircularProgress size={18} /> : <CelebrationOutlined />}
-              sx={{ mt: 3, py: 1.5, fontSize: 16, fontWeight: 700 }}
-            >
-              {confirmLoading ? "Confirming…" : "Confirm Booking"}
-            </Button>
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block", textAlign: "center" }}>
-              You will receive an instant confirmation code.
-            </Typography>
-          </>
-        ) : (
-          <Box
-            sx={{
-              mt: 3,
-              p: 3,
-              borderRadius: 3,
-              border: `2px solid`,
-              borderColor: "primary.main",
-              background: (t) => `${t.palette.primary.main}12`,
-              textAlign: "center",
-            }}
-          >
-            <Typography variant="h6" fontWeight={700} gutterBottom>
-              Almost there!
-            </Typography>
-            <Typography color="text.secondary" sx={{ mb: 2 }}>
-              Log in or create a free account to confirm your booking.
-              Your selections will be saved.
-            </Typography>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} justifyContent="center">
-              <Button
-                variant="contained"
-                color="primary"
-                component={RouterLink}
-                to="/login?redirect=/book"
-                sx={{ fontWeight: 700, px: 4 }}
-              >
-                Log In
-              </Button>
-              <Button
-                variant="outlined"
-                color="primary"
-                component={RouterLink}
-                to="/register?redirect=/book"
-                sx={{ fontWeight: 700, px: 4 }}
-              >
-                Create Account
-              </Button>
-            </Stack>
+function PaymentStep({
+  state,
+  priceBreakdown,
+  user,
+  guestDetails,
+}: {
+  state: BookingState;
+  priceBreakdown: PriceBreakdownType | null;
+  user: { name?: string; email?: string } | null;
+  guestDetails: GuestDetails;
+}) {
+  const total = priceBreakdown?.total ?? 0;
+  const reservationAdvance = total * 0.1;
+  const payableNow = Number.isFinite(reservationAdvance) ? reservationAdvance : 0;
+
+  return (
+    <Grid container spacing={3}>
+      <Grid item xs={12} md={7}>
+        <Typography variant="h6" fontWeight={700} gutterBottom>
+          Dummy Checkout
+        </Typography>
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          This is a placeholder checkout screen for now. No real payment is processed.
+        </Alert>
+        <Stack spacing={1.2}>
+          <Typography><strong>Event Date:</strong> {state.date?.format("DD MMM YYYY")}</Typography>
+          <Typography><strong>Time Window:</strong> {state.startTime?.format("hh:mm A")} - {state.startTime?.add(state.durationHours, "hour").format("hh:mm A")}</Typography>
+          <Typography><strong>Duration:</strong> {state.durationHours} hours</Typography>
+          <Typography><strong>Booked By:</strong> {user ? user.name : guestDetails.name}</Typography>
+          <Typography><strong>Email:</strong> {user ? user.email : guestDetails.email}</Typography>
+          {!user && <Typography><strong>Phone:</strong> {guestDetails.phone}</Typography>}
+        </Stack>
+      </Grid>
+      <Grid item xs={12} md={5}>
+        <Paper sx={{ p: 3, borderRadius: 2 }}>
+          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+            Payment Summary
+          </Typography>
+          <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}>
+            <Typography color="text.secondary">Order Total</Typography>
+            <Typography fontWeight={700}>₹{total.toLocaleString("en-IN")}</Typography>
           </Box>
-        )}
+          <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
+            <Typography color="text.secondary">Pay 10% to Reserve</Typography>
+            <Typography fontWeight={800} color="secondary.main">₹{payableNow.toLocaleString("en-IN")}</Typography>
+          </Box>
+          <Button fullWidth variant="contained" color="secondary" sx={{ fontWeight: 700 }}>
+            Proceed (Dummy Payment)
+          </Button>
+        </Paper>
       </Grid>
     </Grid>
   );
@@ -582,9 +651,7 @@ export default function BookingFlow() {
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [priceBreakdown, setPriceBreakdown] = useState<PriceBreakdownType | null>(null);
   const [loadingPrice, setLoadingPrice] = useState(false);
-  const [confirmLoading, setConfirmLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [confirmedCode, setConfirmedCode] = useState<string | null>(null);
+  const [guestDetails, setGuestDetails] = useState<GuestDetails>({ name: "", email: "", phone: "" });
 
   const [bookingState, setBookingState] = useState<BookingState>({
     date: null,
@@ -608,7 +675,7 @@ export default function BookingFlow() {
     ]).then(([vRes, cRes]) => {
       setVenue(vRes.data);
       setCatalogItems(cRes.data);
-      setBookingState((prev) => ({ ...prev, durationHours: vRes.data.min_hours }));
+      setBookingState((prev) => ({ ...prev, durationHours: Math.max(2, vRes.data.min_hours) }));
     }).finally(() => setLoadingData(false));
   }, []);
 
@@ -619,7 +686,7 @@ export default function BookingFlow() {
     setAvailableSlots([]);
     api
       .get<{ date: string; slots: AvailableSlot[]; is_blackout: boolean; blackout_reason: string | null }>(
-        `/availability?date=${bookingState.date.format("YYYY-MM-DD")}&duration_hours=${bookingState.durationHours}`
+        `/availability/slots?date=${bookingState.date.format("YYYY-MM-DD")}&duration_hours=${bookingState.durationHours}`
       )
       .then((r) => setAvailableSlots(r.data.slots))
       .catch(() => setAvailableSlots([]))
@@ -656,101 +723,13 @@ export default function BookingFlow() {
 
   const canProceed = useCallback((): boolean => {
     if (activeStep === 0) return !!(bookingState.date && bookingState.startTime);
-    return true;
-  }, [activeStep, bookingState.date, bookingState.startTime]);
-
-  const handleConfirm = async () => {
-    if (!venue || !bookingState.date || !bookingState.startTime) return;
-
-    setConfirmLoading(true);
-    setError(null);
-
-    const allLineItems: LineItemInput[] = [
-      ...bookingState.addons.map((id) => ({ catalog_item_id: id, quantity: 1 })),
-      ...Object.entries(bookingState.favors)
-        .filter(([, qty]) => qty > 0)
-        .map(([id, qty]) => ({ catalog_item_id: Number(id), quantity: qty })),
-    ];
-
-    try {
-      const res = await api.post("/bookings", {
-        venue_id: venue.id,
-        date: bookingState.date.format("YYYY-MM-DD"),
-        start_time: bookingState.startTime.format("HH:mm"),
-        duration_hours: bookingState.durationHours,
-        foodcourt_tables_count: bookingState.foodcourtTablesCount,
-        foodcourt_table_notes: bookingState.foodcourtTableNotes || undefined,
-        extra_rooms_count: bookingState.extraRoomsCount,
-        line_items: allLineItems,
-      });
-      setConfirmedCode(res.data.confirmation_code);
-    } catch (err: any) {
-      const msg = err.response?.data?.detail ?? "Booking failed. Please try again.";
-      setError(typeof msg === "string" ? msg : JSON.stringify(msg));
-    } finally {
-      setConfirmLoading(false);
+    if (activeStep === 7 && !user) {
+      const emailOk = /^\S+@\S+\.\S+$/.test(guestDetails.email.trim());
+      const phoneOk = guestDetails.phone.trim().length >= 8;
+      return guestDetails.name.trim().length > 1 && emailOk && phoneOk;
     }
-  };
-
-  // ── Booking confirmed screen ────────────────────────────────────────────────
-  if (confirmedCode) {
-    return (
-      <Box
-        sx={{
-          minHeight: "80vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: `linear-gradient(135deg, ${BRAND.purpleDark} 0%, ${BRAND.purple} 100%)`,
-        }}
-      >
-        <Container maxWidth="sm" sx={{ textAlign: "center", color: "white" }}>
-          <MotionBox initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 200 }}>
-            <Typography sx={{ fontSize: 80 }}>🎉</Typography>
-          </MotionBox>
-          <Typography variant="h4" fontWeight={800} sx={{ mb: 2 }}>
-            Booking Confirmed!
-          </Typography>
-          <Typography sx={{ color: "rgba(255,255,255,0.8)", mb: 3 }}>
-            Your event is locked in. See you at DspireZone!
-          </Typography>
-          <Paper
-            sx={{
-              py: 3, px: 4,
-              display: "inline-block",
-              bgcolor: "rgba(255,255,255,0.1)",
-              backdropFilter: "blur(8px)",
-              border: `1px solid ${BRAND.gold}`,
-              borderRadius: 2,
-            }}
-          >
-            <Typography variant="caption" sx={{ color: BRAND.goldLight, display: "block", mb: 0.5, fontWeight: 700 }}>
-              CONFIRMATION CODE
-            </Typography>
-            <Typography variant="h5" fontWeight={800} sx={{ color: BRAND.gold, letterSpacing: 2 }}>
-              {confirmedCode}
-            </Typography>
-          </Paper>
-          <Box sx={{ mt: 4, display: "flex", gap: 2, justifyContent: "center" }}>
-            <Button
-              variant="contained"
-              color="secondary"
-              onClick={() => navigate("/my-bookings")}
-            >
-              View My Bookings
-            </Button>
-            <Button
-              variant="outlined"
-              sx={{ color: "white", borderColor: "rgba(255,255,255,0.5)" }}
-              onClick={() => navigate("/")}
-            >
-              Back to Home
-            </Button>
-          </Box>
-        </Container>
-      </Box>
-    );
-  }
+    return true;
+  }, [activeStep, bookingState.date, bookingState.startTime, user, guestDetails]);
 
   if (loadingData) return <StepSkeleton />;
 
@@ -785,21 +764,49 @@ export default function BookingFlow() {
         return <FavorsStep catalogItems={catalogItems} state={bookingState} setState={patchState} />;
       case 6:
         return (
-          <ConfirmStep
+          <OrderReviewStep
             state={bookingState}
             priceBreakdown={priceBreakdown}
             catalogItems={catalogItems}
             venue={venue}
             loadingPrice={loadingPrice}
-            confirmLoading={confirmLoading}
-            onConfirm={handleConfirm}
-            error={error}
-            isLoggedIn={!!user}
+          />
+        );
+      case 7:
+        return (
+          <GuestDetailsStep
+            guestDetails={guestDetails}
+            setGuestDetails={setGuestDetails}
+          />
+        );
+      case 8:
+        return (
+          <PaymentStep
+            state={bookingState}
+            priceBreakdown={priceBreakdown}
+            user={user}
+            guestDetails={guestDetails}
           />
         );
       default:
         return null;
     }
+  };
+
+  const handleNext = () => {
+    if (activeStep === 6 && user) {
+      setActiveStep(8);
+      return;
+    }
+    setActiveStep((s) => Math.min(s + 1, STEPS.length - 1));
+  };
+
+  const handleBack = () => {
+    if (activeStep === 8 && user) {
+      setActiveStep(6);
+      return;
+    }
+    setActiveStep((s) => Math.max(0, s - 1));
   };
 
   return (
@@ -863,7 +870,7 @@ export default function BookingFlow() {
         <Box sx={{ display: "flex", justifyContent: "space-between", mt: 3 }}>
           <Button
             startIcon={<ArrowBack />}
-            onClick={() => setActiveStep((s) => s - 1)}
+            onClick={handleBack}
             disabled={activeStep === 0}
           >
             Back
@@ -873,7 +880,7 @@ export default function BookingFlow() {
               endIcon={<ArrowForward />}
               variant="contained"
               color="primary"
-              onClick={() => setActiveStep((s) => s + 1)}
+              onClick={handleNext}
               disabled={!canProceed()}
             >
               {activeStep === 0 ? "Continue" : "Next"}

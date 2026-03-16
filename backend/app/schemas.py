@@ -229,3 +229,31 @@ class BookingOut(BaseModel):
 
 class BookingStatusUpdate(BaseModel):
     status: BookingStatus
+
+
+# ---------------------------------------------------------------------------
+# Vendor Inquiries
+# ---------------------------------------------------------------------------
+
+class VendorInquiryCreate(BaseModel):
+    name: str
+    contact_number: str
+    email: EmailStr
+    business_type: str
+    opted_options: List[str]
+    previous_experience: Optional[str] = None
+    healthy_concept: Optional[str] = None
+
+
+class VendorInquiryOut(BaseModel):
+    id: int
+    name: str
+    contact_number: str
+    email: str
+    business_type: str
+    opted_options: List[str]
+    previous_experience: Optional[str] = None
+    healthy_concept: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}

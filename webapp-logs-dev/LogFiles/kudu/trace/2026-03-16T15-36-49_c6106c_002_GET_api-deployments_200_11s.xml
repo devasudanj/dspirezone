@@ -1,0 +1,9 @@
+<step title="Incoming Request" date="2026-03-16T15:36:49.789" instance="c6106c" url="/api/deployments/" method="GET" type="request" pid="768,1,5" Accept="*/*" Host="dspirezone-app-dev.scm.azurewebsites.net" User-Agent="AZURECLI/2.84.0 (HOMEBREW)" Accept-Encoding="gzip, deflate" Authorization="Bea..." x-ms-client-request-id="eef94192-214d-11f1-abe9-266ebde0f6da" X-ARR-LOG-ID="eef94192-214d-11f1-abe9-266ebde0f6da" CLIENT-IP="174.20.244.125:62262" X-SITE-DEPLOYMENT-ID="dspirezone-app-dev" WAS-DEFAULT-HOSTNAME="dspirezone-app-dev.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/deployments/" X-Client-IP="174.20.244.125" X-Client-Port="62262" >
+  <step title="DeploymentService.GetCurrentEtag" date="2026-03-16T15:36:56.031" >
+    <step title="Current Etag: &quot;8de83712c0f20ad&quot;, Cached Etag: " date="2026-03-16T15:36:57.289" /><!-- duration: 68ms -->
+  </step><!-- duration: 1417ms -->
+  <step title="DeploymentService.GetDeployResults" date="2026-03-16T15:36:57.508" >
+    <step title="DeploymentManager.GetResults" date="2026-03-16T15:36:57.619" /><!-- duration: 1609ms -->
+  </step><!-- duration: 1983ms -->
+  <step title="Outgoing response" date="2026-03-16T15:37:00.847" type="response" statusCode="200" statusText="OK" /><!-- duration: 81ms -->
+</step><!-- duration: 11238ms -->

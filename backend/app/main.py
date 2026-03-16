@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from .database import engine, Base
-from .routers import auth, venue, catalog, availability, bookings, admin
+from .routers import auth, venue, catalog, availability, bookings, admin, vendors
 
 
 @asynccontextmanager
@@ -48,6 +48,7 @@ app.include_router(catalog.router, prefix="/api/catalog", tags=["catalog"])
 app.include_router(availability.router, prefix="/api/availability", tags=["availability"])
 app.include_router(bookings.router, prefix="/api/bookings", tags=["bookings"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+app.include_router(vendors.router, prefix="/api/vendors", tags=["vendors"])
 
 
 # ---------------------------------------------------------------------------

@@ -164,3 +164,17 @@ class BookingLineItem(Base):
 
     booking = relationship("Booking", back_populates="line_items")
     catalog_item = relationship("CatalogItem", back_populates="booking_line_items")
+
+
+class VendorInquiry(Base):
+    __tablename__ = "vendor_inquiries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(120), nullable=False)
+    contact_number = Column(String(40), nullable=False)
+    email = Column(String(255), nullable=False, index=True)
+    business_type = Column(String(120), nullable=False)
+    opted_options = Column(Text, nullable=False)
+    previous_experience = Column(Text)
+    healthy_concept = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
