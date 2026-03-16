@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 533" fill="none">
+  <defs>
+    <linearGradient id="bg7" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4A0E8F"/>
+      <stop offset="100%" stop-color="#7B42D1"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="533" fill="url(#bg7)"/>
+  <!-- Photography camera icon -->
+  <rect x="280" y="180" width="240" height="180" rx="20" fill="#2D0860" opacity="0.9"/>
+  <circle cx="400" cy="270" r="60" fill="#1A0540" opacity="0.9"/>
+  <circle cx="400" cy="270" r="46" fill="#2D0860" opacity="0.9"/>
+  <circle cx="400" cy="270" r="34" fill="#F59E0B" opacity="0.4"/>
+  <circle cx="400" cy="270" r="24" fill="#F59E0B" opacity="0.6"/>
+  <!-- Flash -->
+  <rect x="310" y="158" width="60" height="24" rx="8" fill="#2D0860" opacity="0.9"/>
+  <!-- Lens glare -->
+  <circle cx="388" cy="258" r="8" fill="white" opacity="0.4"/>
+  <!-- Capture moment -->
+  <path d="M150 200 Q400 140 650 200" stroke="#FCD34D" stroke-width="1.5" fill="none" opacity="0.3" stroke-dasharray="6 4"/>
+  <!-- Bokeh circles -->
+  <circle cx="120" cy="150" r="20" fill="#F59E0B" opacity="0.15"/>
+  <circle cx="680" cy="180" r="24" fill="#C084FC" opacity="0.15"/>
+  <circle cx="200" cy="420" r="18" fill="#FCD34D" opacity="0.15"/>
+  <circle cx="600" cy="400" r="22" fill="#F59E0B" opacity="0.15"/>
+  <!-- Label -->
+  <text x="400" y="420" text-anchor="middle" fill="white" font-family="sans-serif" font-size="20" font-weight="700" opacity="0.8">Professional Photography</text>
+  <text x="400" y="490" text-anchor="middle" fill="white" opacity="0.6" font-family="sans-serif" font-size="16" font-weight="600">Capture every precious moment</text>
+</svg>

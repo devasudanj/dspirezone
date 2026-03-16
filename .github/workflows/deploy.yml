@@ -1,0 +1,89 @@
+name: Build & Deploy DspireZone to Azure Web App
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: dspirezone
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Frontend Build ────────────────────────────────────────────────────────
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      # Copy compiled SPA into the backend's static/ directory so FastAPI serves it
+      - name: Copy frontend dist into backend/static
+        run: |
+          rm -rf backend/static
+          mkdir -p backend/static
+          cp -r frontend/dist/. backend/static/
+
+      # ── Backend Tests ─────────────────────────────────────────────────────────
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Run backend tests
+        working-directory: backend
+        env:
+          DATABASE_URL: "sqlite:///./test.db"
+          SECRET_KEY: "ci-test-secret-key-not-for-production"
+        run: pytest tests/ -v --tb=short
+
+      # ── Create startup script ────────────────────────────────────────────────
+      - name: Write Azure startup command script
+        run: |
+          cat > backend/startup.sh << 'EOF'
+          #!/bin/bash
+          cd /home/site/wwwroot
+          pip install -r requirements.txt --quiet
+          alembic upgrade head
+          gunicorn -k uvicorn.workers.UvicornWorker app.main:app \
+            --bind 0.0.0.0:8000 \
+            --workers 2 \
+            --timeout 120 \
+            --access-logfile - \
+            --error-logfile -
+          EOF
+          chmod +x backend/startup.sh
+
+      # ── Deploy to Azure Web App ───────────────────────────────────────────────
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: ./backend
+          startup-command: "bash startup.sh"

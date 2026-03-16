@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 533" fill="none">
+  <defs>
+    <linearGradient id="bg8" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F0FDF4"/>
+      <stop offset="100%" stop-color="#DCFCE7"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="533" fill="url(#bg8)"/>
+  <!-- Party favor items on table -->
+  <rect x="100" y="300" width="600" height="150" rx="12" fill="#BBF7D0" opacity="0.6"/>
+  <!-- Balloon stack -->
+  <circle cx="160" cy="260" r="32" fill="#F87171" opacity="0.9"/>
+  <circle cx="185" cy="235" r="28" fill="#FCA5A5" opacity="0.8"/>
+  <circle cx="150" cy="230" r="28" fill="#FBBF24" opacity="0.9"/>
+  <!-- Party hats -->
+  <path d="M330 320 L360 240 L390 320 Z" fill="#A78BFA" opacity="0.9"/>
+  <path d="M380 320 L410 245 L440 320 Z" fill="#C084FC" opacity="0.9"/>
+  <circle cx="360" cy="238" r="5" fill="#FCD34D"/>
+  <circle cx="410" cy="243" r="5" fill="#FCD34D"/>
+  <!-- Gift boxes -->
+  <rect x="500" y="295" width="70" height="60" rx="6" fill="#F59E0B" opacity="0.9"/>
+  <rect x="495" y="285" width="80" height="16" rx="4" fill="#D97706" opacity="0.9"/>
+  <rect x="534" y="285" width="4" height="76" rx="2" fill="#FBBF24"/>
+  <!-- Return gift bag -->
+  <path d="M590 350 L590 295 Q590 285 600 285 L640 285 Q650 285 650 295 L650 350 Z" fill="#7B42D1" opacity="0.9"/>
+  <path d="M605 295 Q600 275 605 265 L620 265 L635 295" stroke="#4A0E8F" fill="none" stroke-width="3"/>
+  <!-- Candles row -->
+  <rect x="230" y="300" width="8" height="52" rx="4" fill="#F87171" opacity="0.9"/>
+  <rect x="248" y="300" width="8" height="48" rx="4" fill="#FBBF24" opacity="0.9"/>
+  <rect x="266" y="300" width="8" height="52" rx="4" fill="#34D399" opacity="0.9"/>
+  <ellipse cx="234" cy="298" rx="4" ry="5" fill="#FBBF24" opacity="0.9"/>
+  <ellipse cx="252" cy="298" rx="4" ry="5" fill="#F59E0B" opacity="0.9"/>
+  <ellipse cx="270" cy="298" rx="4" ry="5" fill="#FBBF24" opacity="0.9"/>
+  <!-- Label -->
+  <text x="400" y="490" text-anchor="middle" fill="#1A0540" opacity="0.7" font-family="sans-serif" font-size="16" font-weight="600">Party Favors &amp; Essentials Catalog</text>
+</svg>
