@@ -8,4 +8,7 @@ fi
 if [ -f alembic.ini ]; then
   alembic upgrade head || true
 fi
+if [ -f seed.py ]; then
+  python seed.py || true
+fi
 exec gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000 --workers 2 --timeout 180

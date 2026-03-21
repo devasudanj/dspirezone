@@ -14,8 +14,8 @@ import type { Venue } from "../../types";
 interface AvailabilityRule {
   id: number;
   day_of_week: number;
-  open_time: string;
-  close_time: string;
+  start_time: string;
+  end_time: string;
 }
 
 interface BlackoutDate {
@@ -48,13 +48,13 @@ export default function AdminVenue() {
 
   useEffect(() => {
     Promise.all([
-      api.get<Venue>("/venue"),
-      api.get<AvailabilityRule[]>("/admin/availability"),
+      api.get<Venue>("/admin/venue"),
+      api.get<AvailabilityRule[]>("/admin/availability-rules"),
       api.get<BlackoutDate[]>("/admin/blackouts"),
     ]).then(([vRes, aRes, bRes]) => {
       setVenue(vRes.data);
       setForm(vRes.data);
-      setRules(aRes.data);
+      setRules(aRes.data.sort((left, right) => left.day_of_week - right.day_of_week || left.start_time.localeCompare(right.start_time)));
       setBlackouts(bRes.data);
     }).finally(() => setLoading(false));
   }, []);
@@ -64,11 +64,12 @@ export default function AdminVenue() {
     setError(null);
     setSuccess(false);
     try {
-      const res = await api.put<Venue>("/admin/venue", form);
+      const res = await api.patch<Venue>("/admin/venue", form);
       setVenue(res.data);
+      setForm(res.data);
       setSuccess(true);
-    } catch (err: any) {
-      setError(err.response?.data?.detail ?? "Failed to save venue settings.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save venue settings.");
     } finally {
       setSaving(false);
     }
@@ -76,21 +77,21 @@ export default function AdminVenue() {
 
   const addRule = async () => {
     try {
-      const res = await api.post<AvailabilityRule>("/admin/availability", {
+      const res = await api.post<AvailabilityRule>("/admin/availability-rules", {
         day_of_week: Number(ruleForm.day_of_week),
-        open_time: ruleForm.open_time,
-        close_time: ruleForm.close_time,
+        start_time: ruleForm.open_time,
+        end_time: ruleForm.close_time,
       });
-      setRules((p) => [...p, res.data]);
+      setRules((prev) => [...prev, res.data].sort((left, right) => left.day_of_week - right.day_of_week || left.start_time.localeCompare(right.start_time)));
       setRuleDialog(false);
-    } catch (err: any) {
-      setError(err.response?.data?.detail ?? "Failed to add rule.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add rule.");
     }
   };
 
   const deleteRule = async (id: number) => {
     try {
-      await api.delete(`/admin/availability/${id}`);
+      await api.delete(`/admin/availability-rules/${id}`);
       setRules((p) => p.filter((r) => r.id !== id));
     } catch {
       setError("Failed to delete rule.");
@@ -103,8 +104,8 @@ export default function AdminVenue() {
       setBlackouts((p) => [...p, res.data]);
       setBlackoutDialog(false);
       setBlackoutForm({ date: "", reason: "" });
-    } catch (err: any) {
-      setError(err.response?.data?.detail ?? "Failed to add blackout date.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add blackout date.");
     }
   };
 
@@ -196,8 +197,8 @@ export default function AdminVenue() {
               {rules.map((r) => (
                 <TableRow key={r.id} hover>
                   <TableCell>{DAY_NAMES[r.day_of_week]}</TableCell>
-                  <TableCell>{r.open_time}</TableCell>
-                  <TableCell>{r.close_time}</TableCell>
+                  <TableCell>{r.start_time}</TableCell>
+                  <TableCell>{r.end_time}</TableCell>
                   <TableCell>
                     <IconButton size="small" color="error" onClick={() => deleteRule(r.id)}><Delete fontSize="small" /></IconButton>
                   </TableCell>

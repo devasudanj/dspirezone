@@ -12,6 +12,14 @@ import api from "../../api/client";
 import { BRAND } from "../../theme";
 import type { Booking } from "../../types";
 
+function getDurationHours(startTime: string, endTime: string) {
+  const [startHour, startMinute] = startTime.split(":").map(Number);
+  const [endHour, endMinute] = endTime.split(":").map(Number);
+  const startTotalMinutes = startHour * 60 + startMinute;
+  const endTotalMinutes = endHour * 60 + endMinute;
+  return Math.max(0, (endTotalMinutes - startTotalMinutes) / 60);
+}
+
 const STATUS_COLOR: Record<string, "success" | "warning" | "error"> = {
   confirmed: "success",
   draft: "warning",
@@ -99,13 +107,19 @@ export default function AdminDashboard() {
                   {recent.map((b) => (
                     <TableRow key={b.id} hover>
                       <TableCell>
-                        <Typography variant="body2" fontWeight={700} sx={{ color: BRAND.purple, letterSpacing: 0.5 }}>
+                        <Typography
+                          component={RouterLink}
+                          to={`/admin/bookings/${b.id}`}
+                          variant="body2"
+                          fontWeight={700}
+                          sx={{ color: BRAND.purple, letterSpacing: 0.5, textDecoration: "none" }}
+                        >
                           {b.confirmation_code}
                         </Typography>
                       </TableCell>
                       <TableCell>{b.date}</TableCell>
                       <TableCell>{b.start_time}</TableCell>
-                      <TableCell>{b.duration_hours}h</TableCell>
+                      <TableCell>{getDurationHours(b.start_time, b.end_time)}h</TableCell>
                       <TableCell>
                         <Chip
                           label={b.status}

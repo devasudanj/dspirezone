@@ -23,6 +23,9 @@ import { Link as RouterLink } from "react-router-dom";
 import { Storefront, Restaurant, SportsEsports, LocalDining, CheckCircle } from "@mui/icons-material";
 import { BRAND } from "../theme";
 import api from "../api/client";
+import cart1Orange from "../assets/media/cart-1-orange.jpeg";
+import cart2Blue from "../assets/media/cart-2-blue.jpeg";
+import cart3Yellow from "../assets/media/cart-3-yellow.jpeg";
 
 type VendorOption = "Food Court Room" | "Gaming Room" | "Food Cart";
 
@@ -62,9 +65,9 @@ const OPTION_CARDS: Array<{ option: VendorOption; icon: React.ReactNode; note: s
     icon: <LocalDining />,
     note: "Compact cart setup for quick-serve menus and impulse purchases.",
     images: [
-      "/src/assets/media/cart-1-orange.jpeg",
-      "/src/assets/media/cart-2-blue.jpeg",
-      "/src/assets/media/cart-3-yellow.jpeg",
+      cart1Orange,
+      cart2Blue,
+      cart3Yellow,
     ],
   },
 ];

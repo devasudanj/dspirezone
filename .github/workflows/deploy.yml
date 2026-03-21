@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_WEBAPP_NAME: dspirezone
+  AZURE_WEBAPP_NAME: dspirezone-app-dev
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "20"
 

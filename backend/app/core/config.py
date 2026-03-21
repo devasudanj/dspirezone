@@ -8,6 +8,22 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     ENVIRONMENT: str = "development"
+    EMAIL_ENABLED: bool = False
+    # OAuth2 / Microsoft Graph mail (preferred — works with Security Defaults ON)
+    GRAPH_TENANT_ID: Optional[str] = None
+    GRAPH_CLIENT_ID: Optional[str] = None
+    GRAPH_CLIENT_SECRET: Optional[str] = None
+    GRAPH_SENDER_EMAIL: Optional[str] = None  # UPN of the mailbox to send from
+    # Legacy SMTP (fallback — only used when GRAPH_TENANT_ID is not set)
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM_EMAIL: Optional[str] = None
+    SMTP_FROM_NAME: str = "DspireZone"
+    SMTP_USE_TLS: bool = True
+    SMTP_USE_SSL: bool = False
+    ORDER_CONFIRMATION_ADMIN_EMAIL: str = "admin@dspirezone.com"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

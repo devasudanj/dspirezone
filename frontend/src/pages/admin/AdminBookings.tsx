@@ -3,9 +3,10 @@ import {
   Box, Container, Typography, Paper, Table, TableBody,
   TableCell, TableHead, TableRow, Chip, Select, MenuItem,
   FormControl, InputLabel, CircularProgress, Alert, Stack, TextField,
-  InputAdornment,
+  InputAdornment, Button,
 } from "@mui/material";
 import { Search } from "@mui/icons-material";
+import { Link as RouterLink } from "react-router-dom";
 import api from "../../api/client";
 import { BRAND } from "../../theme";
 import type { Booking } from "../../types";
@@ -17,6 +18,14 @@ const STATUS_COLOR: Record<string, "success" | "warning" | "error" | "default"> 
 };
 
 const STATUS_OPTIONS = ["all", "confirmed", "draft", "cancelled"];
+
+function getDurationHours(startTime: string, endTime: string) {
+  const [startHour, startMinute] = startTime.split(":").map(Number);
+  const [endHour, endMinute] = endTime.split(":").map(Number);
+  const startTotalMinutes = startHour * 60 + startMinute;
+  const endTotalMinutes = endHour * 60 + endMinute;
+  return Math.max(0, (endTotalMinutes - startTotalMinutes) / 60);
+}
 
 export default function AdminBookings() {
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -40,7 +49,7 @@ export default function AdminBookings() {
   const handleStatusChange = async (bookingId: number, newStatus: string) => {
     setUpdating(bookingId);
     try {
-      await api.patch(`/admin/bookings/${bookingId}`, { status: newStatus });
+      await api.patch(`/admin/bookings/${bookingId}/status`, { status: newStatus });
       setBookings((prev) => prev.map((b) => b.id === bookingId ? { ...b, status: newStatus as Booking["status"] } : b));
     } catch {
       setError("Failed to update booking status.");
@@ -54,7 +63,10 @@ export default function AdminBookings() {
     return (
       !q ||
       b.confirmation_code?.toLowerCase().includes(q) ||
-      b.date.includes(q)
+      b.date.includes(q) ||
+      b.contact_name?.toLowerCase().includes(q) ||
+      b.contact_email?.toLowerCase().includes(q) ||
+      b.contact_phone?.toLowerCase().includes(q)
     );
   });
 
@@ -100,6 +112,10 @@ export default function AdminBookings() {
                   <TableRow sx={{ bgcolor: "background.default" }}>
                     <TableCell sx={{ fontWeight: 700 }}>ID</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Confirmation</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Order</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Customer</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Phone</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Start</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Duration</TableCell>
@@ -118,9 +134,17 @@ export default function AdminBookings() {
                           {b.confirmation_code}
                         </Typography>
                       </TableCell>
+                      <TableCell>
+                        <Button component={RouterLink} to={`/admin/bookings/${b.id}`} size="small" variant="outlined">
+                          View Details
+                        </Button>
+                      </TableCell>
+                      <TableCell>{b.contact_name || "-"}</TableCell>
+                      <TableCell>{b.contact_email || "-"}</TableCell>
+                      <TableCell>{b.contact_phone || "-"}</TableCell>
                       <TableCell>{b.date}</TableCell>
                       <TableCell>{b.start_time}</TableCell>
-                      <TableCell>{b.duration_hours}h</TableCell>
+                      <TableCell>{getDurationHours(b.start_time, b.end_time)}h</TableCell>
                       <TableCell>{b.rooms_included_count + (b.extra_rooms_count ?? 0)}</TableCell>
                       <TableCell>{b.foodcourt_tables_count ?? 0}</TableCell>
                       <TableCell>₹{Number(b.total_price).toLocaleString("en-IN")}</TableCell>
@@ -141,7 +165,7 @@ export default function AdminBookings() {
                   ))}
                   {filtered.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={9} sx={{ textAlign: "center", py: 4, color: "text.secondary" }}>
+                      <TableCell colSpan={13} sx={{ textAlign: "center", py: 4, color: "text.secondary" }}>
                         No bookings found.
                       </TableCell>
                     </TableRow>

@@ -166,6 +166,9 @@ class BookingCreate(BaseModel):
     date: date
     start_time: time
     duration_hours: float
+    guest_name: Optional[str] = None
+    guest_email: Optional[EmailStr] = None
+    guest_phone: Optional[str] = None
     extra_rooms_count: int = 0
     foodcourt_tables_count: int = 0
     foodcourt_table_notes: Optional[str] = None
@@ -215,6 +218,9 @@ class BookingOut(BaseModel):
     status: BookingStatus
     total_price: float
     confirmation_code: str
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     rooms_included_count: int

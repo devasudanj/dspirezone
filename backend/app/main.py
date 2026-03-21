@@ -7,14 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
+from .bootstrap import ensure_baseline_data
 from .database import engine, Base
-from .routers import auth, venue, catalog, availability, bookings, admin, vendors
+from .routers import auth, venue, catalog, availability, bookings, admin, vendors, contact
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create tables (idempotent; Alembic handles prod migrations)
     Base.metadata.create_all(bind=engine)
+    ensure_baseline_data()
     yield
 
 
@@ -49,6 +51,7 @@ app.include_router(availability.router, prefix="/api/availability", tags=["avail
 app.include_router(bookings.router, prefix="/api/bookings", tags=["bookings"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(vendors.router, prefix="/api/vendors", tags=["vendors"])
+app.include_router(contact.router, prefix="/api/contact", tags=["contact"])
 
 
 # ---------------------------------------------------------------------------

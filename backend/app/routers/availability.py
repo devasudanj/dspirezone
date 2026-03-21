@@ -14,9 +14,21 @@ router = APIRouter()
 def available_slots(
     booking_date: date = Query(..., alias="date"),
     duration_hours: float = Query(2.0, ge=2.0),
-    venue_id: int = Query(1),
+    venue_id: int | None = Query(None),
     db: Session = Depends(get_db),
 ):
+    if venue_id is None:
+        first_venue = db.query(Venue.id).order_by(Venue.id.asc()).first()
+        if not first_venue:
+            return AvailableSlotsResponse(
+                date=booking_date,
+                duration_hours=duration_hours,
+                slots=[],
+                is_blackout=False,
+                blackout_reason=None,
+            )
+        venue_id = int(first_venue[0])
+
     slots, is_blackout, blackout_reason = get_available_slots(
         db, venue_id, booking_date, duration_hours
     )

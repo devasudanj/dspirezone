@@ -103,7 +103,7 @@ export default function Footer() {
               <Box sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
                 <LocationOn sx={{ fontSize: 18, opacity: 0.7, mt: 0.2, flexShrink: 0 }} />
                 <Typography variant="body2" sx={{ opacity: 0.7, lineHeight: 1.6 }}>
-                  123 Celebration Street, New Perungalathur, Chennai – 600 063
+                  30 Srinivasa Perumal Sannathi, Anna Salai, New Perungalathur, Chennai – 600 063, Tamil Nadu
                 </Typography>
               </Box>
               <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>

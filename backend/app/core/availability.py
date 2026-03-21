@@ -69,6 +69,17 @@ def get_available_slots(
         )
         .all()
     )
+    # Backward-compat: some data may use 0=Sunday ... 6=Saturday.
+    if not rules:
+        sunday_based_day = (day_of_week + 1) % 7
+        rules = (
+            db.query(AvailabilityRule)
+            .filter(
+                AvailabilityRule.venue_id == venue_id,
+                AvailabilityRule.day_of_week == sunday_based_day,
+            )
+            .all()
+        )
     if not rules:
         return [], False, None
 
@@ -78,7 +89,7 @@ def get_available_slots(
         .filter(
             Booking.venue_id == venue_id,
             Booking.date == booking_date,
-            Booking.status.in_([BookingStatus.confirmed, BookingStatus.draft]),
+            Booking.status == BookingStatus.confirmed,
         )
         .all()
     )
@@ -144,7 +155,7 @@ def is_slot_available(
         .filter(
             Booking.venue_id == venue_id,
             Booking.date == booking_date,
-            Booking.status.in_([BookingStatus.confirmed, BookingStatus.draft]),
+            Booking.status == BookingStatus.confirmed,
         )
         .all()
     )

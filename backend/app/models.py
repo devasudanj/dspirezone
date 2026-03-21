@@ -134,6 +134,9 @@ class Booking(Base):
     status = Column(Enum(BookingStatus), default=BookingStatus.draft, nullable=False)
     total_price = Column(Float, nullable=False)
     confirmation_code = Column(String(20), unique=True, nullable=False, index=True)
+    contact_name = Column(String(100))
+    contact_email = Column(String(255), index=True)
+    contact_phone = Column(String(40))
     notes = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     # Room info

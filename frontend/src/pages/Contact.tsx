@@ -6,6 +6,7 @@ import {
 import { LocationOn, Email, Phone, AccessTime, Send } from "@mui/icons-material";
 import { motion } from "framer-motion";
 import { BRAND } from "../theme";
+import api from "../api/client";
 
 const MotionBox = motion(Box);
 
@@ -13,18 +14,23 @@ export default function Contact() {
   const [form, setForm] = useState({ name: "", email: "", phone: "", message: "" });
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // Simulate submission (replace with real API call)
-    setTimeout(() => {
-      setLoading(false);
+    setError("");
+    try {
+      await api.post("/contact", form);
       setSubmitted(true);
-    }, 1200);
+    } catch (err: any) {
+      setError(err.message || "Failed to send message. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -58,7 +64,7 @@ export default function Contact() {
             </Typography>
             <Stack spacing={3}>
               {[
-                { icon: <LocationOn />, label: "Address", text: "123 Celebration Street, New Perungalathur\nChennai – 600 063, Tamil Nadu" },
+                { icon: <LocationOn />, label: "Address", text: "30 Srinivasa Perumal Sannathi, Anna Salai\nNew Perungalathur, Chennai – 600 063\nTamil Nadu" },
                 { icon: <Email />, label: "Email", text: "hello@dspirezone.com" },
                 { icon: <Phone />, label: "Phone", text: "+91 98765 43210" },
                 { icon: <AccessTime />, label: "Hours", text: "Mon–Fri: 10am–9pm\nSat–Sun: 9am–10pm" },
@@ -84,7 +90,7 @@ export default function Contact() {
                   <Typography color="text.secondary" sx={{ mt: 1 }}>
                     Thank you for reaching out. We'll get back to you within 24 hours.
                   </Typography>
-                  <Button sx={{ mt: 3 }} variant="outlined" onClick={() => { setSubmitted(false); setForm({ name: "", email: "", phone: "", message: "" }); }}>
+                  <Button sx={{ mt: 3 }} variant="outlined" onClick={() => { setSubmitted(false); setError(""); setForm({ name: "", email: "", phone: "", message: "" }); }}>
                     Send Another Message
                   </Button>
                 </MotionBox>
@@ -122,6 +128,11 @@ export default function Contact() {
                         {loading ? "Sending…" : "Send Message"}
                       </Button>
                     </Grid>
+                    {error && (
+                      <Grid item xs={12}>
+                        <Alert severity="error">{error}</Alert>
+                      </Grid>
+                    )}
                   </Grid>
                 </Box>
               )}

@@ -624,7 +624,7 @@ export default function Home() {
                   <Box>
                     <Typography fontWeight={700}>Address</Typography>
                     <Typography color="text.secondary">
-                      123 Celebration Street, New Perungalathur, Chennai – 600 063, Tamil Nadu
+                      30 Srinivasa Perumal Sannathi, Anna Salai, New Perungalathur, Chennai – 600 063, Tamil Nadu
                     </Typography>
                   </Box>
                 </Box>

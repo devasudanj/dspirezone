@@ -19,7 +19,7 @@ import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import PriceBreakdown from "../components/PriceBreakdown";
 import { BRAND } from "../theme";
-import type { Venue, CatalogItem, AvailableSlot, PriceBreakdown as PriceBreakdownType } from "../types";
+import type { Venue, CatalogItem, AvailableSlot, PriceBreakdown as PriceBreakdownType, Booking } from "../types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface LineItemInput {
@@ -69,13 +69,14 @@ function StepSkeleton() {
 
 // ─── Step 1 ───────────────────────────────────────────────────────────────────
 function DateTimeStep({
-  state, setState, venue, availableSlots, loadingSlots,
+  state, setState, venue, availableSlots, loadingSlots, slotsError,
 }: {
   state: BookingState;
   setState: (s: Partial<BookingState>) => void;
   venue: Venue | null;
   availableSlots: AvailableSlot[];
   loadingSlots: boolean;
+  slotsError: string;
 }) {
   const minDuration = Math.max(2, venue?.min_hours ?? 2);
   const durationCount = Math.max(1, Math.min(10, 12 - (minDuration - 1)));
@@ -126,6 +127,8 @@ function DateTimeStep({
                   <Chip key={i} label="Loading..." sx={{ opacity: 0.4 }} />
                 ))}
               </Box>
+            ) : slotsError ? (
+              <Alert severity="error">{slotsError}</Alert>
             ) : availableSlots.length === 0 ? (
               <Alert severity="warning">No available slots on this date. Please try another date.</Alert>
             ) : (
@@ -586,11 +589,19 @@ function PaymentStep({
   priceBreakdown,
   user,
   guestDetails,
+  submitting,
+  submitError,
+  createdBooking,
+  onSubmit,
 }: {
   state: BookingState;
   priceBreakdown: PriceBreakdownType | null;
   user: { name?: string; email?: string } | null;
   guestDetails: GuestDetails;
+  submitting: boolean;
+  submitError: string;
+  createdBooking: Booking | null;
+  onSubmit: () => void;
 }) {
   const total = priceBreakdown?.total ?? 0;
   const reservationAdvance = total * 0.1;
@@ -600,11 +611,17 @@ function PaymentStep({
     <Grid container spacing={3}>
       <Grid item xs={12} md={7}>
         <Typography variant="h6" fontWeight={700} gutterBottom>
-          Dummy Checkout
+          Reservation Checkout
         </Typography>
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          This is a placeholder checkout screen for now. No real payment is processed.
+        <Alert severity="info" sx={{ mb: 2 }}>
+          This confirms the booking immediately using the demo payment flow. The reserved time will be blocked from future bookings.
         </Alert>
+        {submitError && <Alert severity="error" sx={{ mb: 2 }}>{submitError}</Alert>}
+        {createdBooking && (
+          <Alert severity="success" sx={{ mb: 2 }}>
+            Booking confirmed. Confirmation code: <strong>{createdBooking.confirmation_code}</strong>
+          </Alert>
+        )}
         <Stack spacing={1.2}>
           <Typography><strong>Event Date:</strong> {state.date?.format("DD MMM YYYY")}</Typography>
           <Typography><strong>Time Window:</strong> {state.startTime?.format("hh:mm A")} - {state.startTime?.add(state.durationHours, "hour").format("hh:mm A")}</Typography>
@@ -627,8 +644,8 @@ function PaymentStep({
             <Typography color="text.secondary">Pay 10% to Reserve</Typography>
             <Typography fontWeight={800} color="secondary.main">₹{payableNow.toLocaleString("en-IN")}</Typography>
           </Box>
-          <Button fullWidth variant="contained" color="secondary" sx={{ fontWeight: 700 }}>
-            Proceed (Dummy Payment)
+          <Button fullWidth variant="contained" color="secondary" sx={{ fontWeight: 700 }} onClick={onSubmit} disabled={submitting || !!createdBooking}>
+            {createdBooking ? "Booking Confirmed" : submitting ? "Confirming Booking..." : "Proceed (Dummy Payment)"}
           </Button>
         </Paper>
       </Grid>
@@ -649,9 +666,13 @@ export default function BookingFlow() {
   const [loadingData, setLoadingData] = useState(true);
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
+  const [slotsError, setSlotsError] = useState("");
   const [priceBreakdown, setPriceBreakdown] = useState<PriceBreakdownType | null>(null);
   const [loadingPrice, setLoadingPrice] = useState(false);
   const [guestDetails, setGuestDetails] = useState<GuestDetails>({ name: "", email: "", phone: "" });
+  const [submittingBooking, setSubmittingBooking] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [createdBooking, setCreatedBooking] = useState<Booking | null>(null);
 
   const [bookingState, setBookingState] = useState<BookingState>({
     date: null,
@@ -667,6 +688,33 @@ export default function BookingFlow() {
   const patchState = (patch: Partial<BookingState>) =>
     setBookingState((prev) => ({ ...prev, ...patch }));
 
+  const buildLineItems = useCallback((): LineItemInput[] => {
+    return [
+      ...bookingState.addons.map((id) => ({ catalog_item_id: id, quantity: 1 })),
+      ...Object.entries(bookingState.favors)
+        .filter(([, qty]) => qty > 0)
+        .map(([id, qty]) => ({ catalog_item_id: Number(id), quantity: qty })),
+    ];
+  }, [bookingState.addons, bookingState.favors]);
+
+  const loadAvailableSlots = useCallback(async (dateValue: Dayjs, durationHours: number, venueId: number) => {
+    setLoadingSlots(true);
+    setSlotsError("");
+    try {
+      const response = await api.get<{ date: string; slots: AvailableSlot[] }>(
+        `/availability/slots?venue_id=${venueId}&date=${dateValue.format("YYYY-MM-DD")}&duration_hours=${durationHours}`
+      );
+      setAvailableSlots(response.data.slots);
+      return response.data.slots;
+    } catch (err) {
+      setAvailableSlots([]);
+      setSlotsError(err instanceof Error ? err.message : "Unable to load available slots");
+      return [];
+    } finally {
+      setLoadingSlots(false);
+    }
+  }, []);
+
   // Load venue + catalog
   useEffect(() => {
     Promise.all([
@@ -681,30 +729,16 @@ export default function BookingFlow() {
 
   // Load available slots when date or duration changes
   useEffect(() => {
-    if (!bookingState.date) return;
-    setLoadingSlots(true);
+    if (!bookingState.date || !venue) return;
     setAvailableSlots([]);
-    api
-      .get<{ date: string; slots: AvailableSlot[]; is_blackout: boolean; blackout_reason: string | null }>(
-        `/availability/slots?date=${bookingState.date.format("YYYY-MM-DD")}&duration_hours=${bookingState.durationHours}`
-      )
-      .then((r) => setAvailableSlots(r.data.slots))
-      .catch(() => setAvailableSlots([]))
-      .finally(() => setLoadingSlots(false));
-  }, [bookingState.date, bookingState.durationHours]);
+    void loadAvailableSlots(bookingState.date, bookingState.durationHours, venue.id);
+  }, [bookingState.date, bookingState.durationHours, venue, loadAvailableSlots]);
 
   // Build price breakdown when entering step 7
   useEffect(() => {
     if (activeStep !== 6) return;
     if (!venue || !bookingState.startTime) return;
     setLoadingPrice(true);
-
-    const allLineItems: LineItemInput[] = [
-      ...bookingState.addons.map((id) => ({ catalog_item_id: id, quantity: 1 })),
-      ...Object.entries(bookingState.favors)
-        .filter(([, qty]) => qty > 0)
-        .map(([id, qty]) => ({ catalog_item_id: Number(id), quantity: qty })),
-    ];
 
     api
       .post<PriceBreakdownType>("/bookings/preview", {
@@ -714,12 +748,48 @@ export default function BookingFlow() {
         duration_hours: bookingState.durationHours,
         foodcourt_tables_count: bookingState.foodcourtTablesCount,
         extra_rooms_count: bookingState.extraRoomsCount,
-        line_items: allLineItems,
+        line_items: buildLineItems(),
       })
       .then((r) => setPriceBreakdown(r.data))
       .catch(() => setPriceBreakdown(null))
       .finally(() => setLoadingPrice(false));
-  }, [activeStep]);
+  }, [activeStep, venue, bookingState.date, bookingState.startTime, bookingState.durationHours, bookingState.foodcourtTablesCount, bookingState.extraRoomsCount, buildLineItems]);
+
+  const handleBookingSubmit = useCallback(async () => {
+    if (!venue || !bookingState.date || !bookingState.startTime) {
+      setSubmitError("Select a valid date and time before confirming the booking.");
+      return;
+    }
+
+    setSubmittingBooking(true);
+    setSubmitError("");
+
+    try {
+      const response = await api.post<Booking>("/bookings", {
+        venue_id: venue.id,
+        date: bookingState.date.format("YYYY-MM-DD"),
+        start_time: bookingState.startTime.format("HH:mm"),
+        duration_hours: bookingState.durationHours,
+        guest_name: user ? undefined : guestDetails.name.trim(),
+        guest_email: user ? undefined : guestDetails.email.trim(),
+        guest_phone: user ? undefined : guestDetails.phone.trim(),
+        extra_rooms_count: bookingState.extraRoomsCount,
+        foodcourt_tables_count: bookingState.foodcourtTablesCount,
+        foodcourt_table_notes: bookingState.foodcourtTableNotes || undefined,
+        line_items: buildLineItems(),
+      });
+
+      setCreatedBooking(response.data);
+      const refreshedSlots = await loadAvailableSlots(bookingState.date, bookingState.durationHours, venue.id);
+      if (!refreshedSlots.includes(bookingState.startTime.format("HH:mm"))) {
+        patchState({ startTime: null });
+      }
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Unable to complete booking");
+    } finally {
+      setSubmittingBooking(false);
+    }
+  }, [venue, bookingState, user, guestDetails, buildLineItems, loadAvailableSlots]);
 
   const canProceed = useCallback((): boolean => {
     if (activeStep === 0) return !!(bookingState.date && bookingState.startTime);
@@ -743,6 +813,7 @@ export default function BookingFlow() {
             venue={venue}
             availableSlots={availableSlots}
             loadingSlots={loadingSlots}
+            slotsError={slotsError}
           />
         );
       case 1:
@@ -786,6 +857,10 @@ export default function BookingFlow() {
             priceBreakdown={priceBreakdown}
             user={user}
             guestDetails={guestDetails}
+            submitting={submittingBooking}
+            submitError={submitError}
+            createdBooking={createdBooking}
+            onSubmit={handleBookingSubmit}
           />
         );
       default:

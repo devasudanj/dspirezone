@@ -3,7 +3,7 @@ import string
 from datetime import datetime, timedelta
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -12,12 +12,14 @@ from ..models import (
     User, Venue, PriceType
 )
 from ..schemas import BookingCreate, BookingOut, PriceBreakdown
-from ..deps import get_current_user
+from ..deps import get_current_user, get_optional_user
 from ..core.availability import is_slot_available
 from ..core.pricing import (
     calculate_booking_breakdown,
     calculate_line_item_total,
 )
+from ..core.email import send_booking_confirmation_emails
+from ..core.security import get_password_hash
 
 router = APIRouter()
 
@@ -25,6 +27,26 @@ router = APIRouter()
 def _gen_code() -> str:
     alphabet = string.ascii_uppercase + string.digits
     return "DZ-" + "".join(secrets.choice(alphabet) for _ in range(8))
+
+
+def _extract_guest_phone(notes: str | None) -> str | None:
+    if not notes:
+        return None
+    prefix = "Guest phone:"
+    for line in notes.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix):].strip() or None
+    return None
+
+
+def serialize_booking(booking: Booking, breakdown: PriceBreakdown | None = None) -> BookingOut:
+    payload = BookingOut.model_validate(booking).model_dump()
+    payload["contact_name"] = booking.contact_name or (booking.user.name if booking.user else None)
+    payload["contact_email"] = booking.contact_email or (booking.user.email if booking.user else None)
+    payload["contact_phone"] = booking.contact_phone or _extract_guest_phone(booking.notes)
+    if breakdown is not None:
+        payload["price_breakdown"] = breakdown.model_dump()
+    return BookingOut(**payload)
 
 
 @router.post("/preview", response_model=PriceBreakdown)
@@ -75,12 +97,40 @@ def preview_booking(
 @router.post("", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
 def create_booking(
     payload: BookingCreate,
-    current_user: User = Depends(get_current_user),
+    background_tasks: BackgroundTasks,
+    current_user: User | None = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
     venue: Venue = db.get(Venue, payload.venue_id)
     if not venue:
         raise HTTPException(status_code=404, detail="Venue not found")
+
+    booking_user = current_user
+    guest_notes: list[str] = []
+
+    if booking_user is None:
+        if not payload.guest_name or not payload.guest_email or not payload.guest_phone:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Guest name, email, and phone are required to complete the booking",
+            )
+
+        existing_user = db.query(User).filter(User.email == payload.guest_email.lower()).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An account already exists for this email. Please sign in to complete the booking.",
+            )
+
+        booking_user = User(
+            name=payload.guest_name,
+            email=payload.guest_email.lower(),
+            password_hash=get_password_hash(secrets.token_urlsafe(24)),
+        )
+        db.add(booking_user)
+        db.flush()
+
+        guest_notes.append(f"Guest phone: {payload.guest_phone}")
 
     if payload.duration_hours < venue.min_hours:
         raise HTTPException(
@@ -147,14 +197,17 @@ def create_booking(
 
     booking = Booking(
         venue_id=venue.id,
-        user_id=current_user.id,
+        user_id=booking_user.id,
         date=payload.date,
         start_time=payload.start_time,
         end_time=end_time,
         status=BookingStatus.confirmed,
         total_price=breakdown["total"],
         confirmation_code=code,
-        notes=payload.notes,
+        contact_name=payload.guest_name or booking_user.name,
+        contact_email=(payload.guest_email.lower() if payload.guest_email else booking_user.email),
+        contact_phone=payload.guest_phone,
+        notes="\n".join([note for note in [payload.notes, *guest_notes] if note]),
         rooms_included_count=venue.included_rooms_count,
         extra_rooms_count=payload.extra_rooms_count,
         foodcourt_tables_count=payload.foodcourt_tables_count,
@@ -170,9 +223,17 @@ def create_booking(
     db.commit()
     db.refresh(booking)
 
-    result = BookingOut.model_validate(booking)
-    result.price_breakdown = PriceBreakdown(**breakdown)
-    return result
+    response = serialize_booking(booking, PriceBreakdown(**breakdown))
+    background_tasks.add_task(
+        send_booking_confirmation_emails,
+        response.model_dump(mode="python"),
+        {
+            "name": venue.name,
+            "address": venue.address,
+        },
+    )
+
+    return response
 
 
 @router.get("/my", response_model=List[BookingOut])
@@ -186,7 +247,7 @@ def my_bookings(
         .order_by(Booking.created_at.desc())
         .all()
     )
-    return bookings
+    return [serialize_booking(booking) for booking in bookings]
 
 
 @router.get("/{booking_id}", response_model=BookingOut)
@@ -202,4 +263,4 @@ def get_booking(
     from ..models import UserRole
     if current_user.role != UserRole.admin and booking.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
-    return booking
+    return serialize_booking(booking)

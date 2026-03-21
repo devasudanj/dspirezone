@@ -18,6 +18,7 @@ const Register = lazy(() => import("./pages/Register"));
 const MyBookings = lazy(() => import("./pages/MyBookings"));
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
 const AdminBookings = lazy(() => import("./pages/admin/AdminBookings"));
+const AdminBookingDetails = lazy(() => import("./pages/admin/AdminBookingDetails"));
 const AdminCatalog = lazy(() => import("./pages/admin/AdminCatalog"));
 const AdminVenue = lazy(() => import("./pages/admin/AdminVenue"));
 
@@ -71,6 +72,14 @@ export default function App() {
                 element={
                   <ProtectedRoute adminOnly>
                     <AdminBookings />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/bookings/:bookingId"
+                element={
+                  <ProtectedRoute adminOnly>
+                    <AdminBookingDetails />
                   </ProtectedRoute>
                 }
               />

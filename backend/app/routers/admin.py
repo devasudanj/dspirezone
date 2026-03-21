@@ -16,6 +16,7 @@ from ..schemas import (
 )
 from ..deps import get_admin_user
 from ..models import User
+from .bookings import serialize_booking
 
 router = APIRouter()
 
@@ -204,7 +205,8 @@ def admin_list_bookings(
     q = db.query(Booking)
     if status_filter:
         q = q.filter(Booking.status == status_filter)
-    return q.order_by(Booking.created_at.desc()).all()
+    bookings = q.order_by(Booking.created_at.desc()).all()
+    return [serialize_booking(booking) for booking in bookings]
 
 
 @router.patch("/bookings/{booking_id}/status", response_model=BookingOut)
@@ -220,4 +222,4 @@ def admin_update_booking_status(
     booking.status = payload.status
     db.commit()
     db.refresh(booking)
-    return booking
+    return serialize_booking(booking)

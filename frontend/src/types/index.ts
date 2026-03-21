@@ -82,10 +82,12 @@ export interface Booking {
   date: string;
   start_time: string;
   end_time: string;
-  duration_hours: number;
   status: BookingStatus;
   total_price: number;
   confirmation_code: string;
+  contact_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
   notes?: string;
   created_at?: string;
   rooms_included_count: number;

@@ -11,6 +11,14 @@ import api from "../api/client";
 import { BRAND } from "../theme";
 import type { Booking } from "../types";
 
+function getDurationHours(startTime: string, endTime: string) {
+  const [startHour, startMinute] = startTime.split(":").map(Number);
+  const [endHour, endMinute] = endTime.split(":").map(Number);
+  const startTotalMinutes = startHour * 60 + startMinute;
+  const endTotalMinutes = endHour * 60 + endMinute;
+  return Math.max(0, (endTotalMinutes - startTotalMinutes) / 60);
+}
+
 const STATUS_COLOR: Record<string, "success" | "warning" | "error" | "default"> = {
   confirmed: "success",
   draft: "warning",
@@ -45,7 +53,7 @@ function BookingCard({ booking }: { booking: Booking }) {
               <Box>
                 <Typography variant="caption" color="text.secondary">Time</Typography>
                 <Typography variant="body2" fontWeight={600}>
-                  {booking.start_time} · {booking.duration_hours}h
+                  {booking.start_time} · {getDurationHours(booking.start_time, booking.end_time)}h
                 </Typography>
               </Box>
             </Stack>
