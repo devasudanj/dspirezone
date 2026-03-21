@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 import {
   Box, Container, Typography, Grid, TextField, Button,
-  Stack, Avatar, Paper, Divider, Alert, CircularProgress,
+  Stack, Avatar, Paper, Divider, Alert, CircularProgress, IconButton,
 } from "@mui/material";
 import { LocationOn, Email, Phone, AccessTime, Send } from "@mui/icons-material";
+import { Instagram, Facebook } from "@mui/icons-material";
 import { motion } from "framer-motion";
 import { BRAND } from "../theme";
 import api from "../api/client";
@@ -78,6 +79,30 @@ export default function Contact() {
                 </Box>
               ))}
             </Stack>
+
+            <Box sx={{ mt: 4 }}>
+              <Typography fontWeight={700} sx={{ mb: 1.5 }}>Follow Us</Typography>
+              <Stack direction="row" spacing={1}>
+                <IconButton
+                  component="a"
+                  href="https://www.instagram.com/dspirezone"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  sx={{ border: `1px solid ${BRAND.purple}30`, color: BRAND.purple, "&:hover": { bgcolor: `${BRAND.purple}12` } }}
+                >
+                  <Instagram />
+                </IconButton>
+                <IconButton
+                  component="a"
+                  href="https://www.facebook.com/share/1DfJVwayt5/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  sx={{ border: `1px solid ${BRAND.purple}30`, color: BRAND.purple, "&:hover": { bgcolor: `${BRAND.purple}12` } }}
+                >
+                  <Facebook />
+                </IconButton>
+              </Stack>
+            </Box>
           </Grid>
 
           {/* Contact Form */}

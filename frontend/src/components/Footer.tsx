@@ -44,10 +44,19 @@ export default function Footer() {
               Chennai's premier boutique event venue — perfect for birthdays, baby showers, and intimate celebrations in New Perungalathur.
             </Typography>
             <Stack direction="row" spacing={1}>
-              {[Facebook, Instagram, Twitter, YouTube].map((Icon, i) => (
+              {[
+                { Icon: Instagram, href: "https://www.instagram.com/dspirezone" },
+                { Icon: Facebook, href: "https://www.facebook.com/share/1DfJVwayt5/" },
+                { Icon: Twitter, href: "#" },
+                { Icon: YouTube, href: \"https://www.youtube.com/@DspireZone\" },
+              ].map(({ Icon, href }, i) => (
                 <IconButton
                   key={i}
                   size="small"
+                  component="a"
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   sx={{
                     color: "white",
                     opacity: 0.7,
