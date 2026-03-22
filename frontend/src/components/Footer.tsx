@@ -48,7 +48,7 @@ export default function Footer() {
                 { Icon: Instagram, href: "https://www.instagram.com/dspirezone" },
                 { Icon: Facebook, href: "https://www.facebook.com/share/1DfJVwayt5/" },
                 { Icon: Twitter, href: "#" },
-                { Icon: YouTube, href: \"https://www.youtube.com/@DspireZone\" },
+                { Icon: YouTube, href: "https://www.youtube.com/@DspireZone" },
               ].map(({ Icon, href }, i) => (
                 <IconButton
                   key={i}
