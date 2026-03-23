@@ -1,4 +1,5 @@
 from datetime import date, time, datetime
+from datetime import date as _Date, time as _Time  # aliases used where field name shadows type name
 from typing import Optional, List
 from pydantic import BaseModel, EmailStr, field_validator
 
@@ -221,8 +222,9 @@ class BookingOut(BaseModel):
     contact_name: Optional[str] = None
     contact_email: Optional[str] = None
     contact_phone: Optional[str] = None
+    alt_email: Optional[str] = None
+    alt_phone: Optional[str] = None
     notes: Optional[str] = None
-    created_at: Optional[datetime] = None
     rooms_included_count: int
     extra_rooms_count: int
     foodcourt_tables_count: int
@@ -235,6 +237,79 @@ class BookingOut(BaseModel):
 
 class BookingStatusUpdate(BaseModel):
     status: BookingStatus
+
+
+# ---------------------------------------------------------------------------
+# Booking Modify / Update
+# ---------------------------------------------------------------------------
+
+class BookingUpdate(BaseModel):
+    """Payload for modifying an existing booking. confirmation_code is used to
+    authorise the update without requiring a login token."""
+
+    confirmation_code: str
+    date: Optional[_Date] = None
+    start_time: Optional[_Time] = None
+    duration_hours: Optional[float] = None
+    extra_rooms_count: Optional[int] = None
+    foodcourt_tables_count: Optional[int] = None
+    foodcourt_table_notes: Optional[str] = None
+    notes: Optional[str] = None
+    line_items: Optional[List[BookingLineItemInput]] = None
+    contact_name: Optional[str] = None
+    contact_email: Optional[EmailStr] = None
+    contact_phone: Optional[str] = None
+    alt_email: Optional[EmailStr] = None
+    alt_phone: Optional[str] = None
+    # Name of whoever is making the change (guest name or logged-in user name)
+    changed_by_name: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Payments
+# ---------------------------------------------------------------------------
+
+class PaymentCreate(BaseModel):
+    amount: float
+    status: str = "completed"
+    payment_ref: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class PaymentOut(BaseModel):
+    id: int
+    booking_id: int
+    amount: float
+    status: str
+    payment_ref: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class BookingAuditLogOut(BaseModel):
+    id: int
+    booking_id: int
+    changed_by_name: Optional[str] = None
+    changed_at: Optional[datetime] = None
+    change_summary: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class PaymentsSummary(BaseModel):
+    payments: List[PaymentOut]
+    total_paid: float
+    booking_total: float
+    remaining_due: float
+
+
+class BookingOutWithPayments(BookingOut):
+    """Extended BookingOut that includes payment summary and audit history."""
+    total_paid: float = 0.0
+    remaining_due: float = 0.0
+    audit_logs: List[BookingAuditLogOut] = []
 
 
 # ---------------------------------------------------------------------------

@@ -720,6 +720,24 @@ export default function Home() {
           >
             Book Your Event Now
           </Button>
+          <Box sx={{ mt: 2 }}>
+            <Button
+              component={RouterLink}
+              to="/modify-booking"
+              variant="outlined"
+              size="large"
+              sx={{
+                color: "white",
+                borderColor: "rgba(255,255,255,0.7)",
+                fontWeight: 700,
+                px: 4,
+                py: 1.2,
+                "&:hover": { borderColor: "white", bgcolor: "rgba(255,255,255,0.1)" },
+              }}
+            >
+              Modify / Update My Booking
+            </Button>
+          </Box>
         </Container>
       </Box>
     </Box>

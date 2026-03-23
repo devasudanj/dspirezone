@@ -18,13 +18,14 @@ interface Props {
   breakdown: Partial<PriceBreakdownType>;
   venue?: Venue | null;
   durationHours?: number;
+  foodSubtotal?: number;
 }
 
 function fmt(n: number) {
   return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export default function PriceBreakdown({ breakdown, venue, durationHours }: Props) {
+export default function PriceBreakdown({ breakdown, venue, durationHours, foodSubtotal }: Props) {
   const dur = durationHours ?? breakdown.duration_hours ?? 0;
   const buffer = breakdown.buffer_minutes ?? venue?.buffer_minutes ?? 30;
 
@@ -53,6 +54,11 @@ export default function PriceBreakdown({ breakdown, venue, durationHours }: Prop
       label: "Favors & essentials",
       value: breakdown.favors_subtotal,
       show: (breakdown.favors_subtotal ?? 0) > 0,
+    },
+    {
+      label: "Food selection",
+      value: foodSubtotal,
+      show: (foodSubtotal ?? 0) > 0,
     },
   ].filter((r) => r.show);
 
@@ -129,7 +135,7 @@ export default function PriceBreakdown({ breakdown, venue, durationHours }: Prop
           Total
         </Typography>
         <Typography variant="h6" fontWeight={800} color="primary">
-          {fmt(breakdown.total ?? 0)}
+          {fmt((breakdown.total ?? 0) + (foodSubtotal ?? 0))}
         </Typography>
       </Box>
     </Paper>

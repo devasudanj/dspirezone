@@ -35,6 +35,7 @@ interface BookingState {
   foodcourtTablesCount: number;
   foodcourtTableNotes: string;
   extraRoomsCount: number;
+  foodSelections: Record<string, number>;  // food item key → quantity
   favors: Record<number, number>;  // item_id → quantity
 }
 
@@ -42,18 +43,34 @@ interface GuestDetails {
   name: string;
   email: string;
   phone: string;
+  estimatedGuests: number | "";
 }
 
 const STEPS = [
   "Date & Time",
+  "Guest Details",
   "Included Items",
   "Service Add-ons",
   "Food Court Tables",
-  "Extra Rooms",
+  "Food Selection",
   "Favors & Essentials",
   "Order Review",
-  "Guest Details",
   "Payment",
+];
+
+const FOOD_MENU = [
+  // ── Personal (per head, not shareable) ──
+  { key: "pizza_chicken",         label: "Personal Pizza – Chicken",    note: "Personal size · not shareable",      price: 199, priceLabel: "₹199 per item",         emoji: "🍕", bg: "#fff3e0", shared: false, step: 1  },
+  { key: "pizza_veg",             label: "Personal Pizza – Veg",        note: "Personal size · not shareable",      price: 179, priceLabel: "₹179 per item",         emoji: "🍕", bg: "#f1f8e9", shared: false, step: 1  },
+  { key: "mutton_biryani_kids",   label: "Mutton Biryani – Kids",       note: "Kids portion · per head",            price: 249, priceLabel: "₹249 per head",         emoji: "🍚", bg: "#fce4ec", shared: false, step: 1  },
+  { key: "mutton_biryani_adult",  label: "Mutton Biryani – Adult",      note: "Full adult portion · per head",      price: 349, priceLabel: "₹349 per head",         emoji: "🍛", bg: "#fce4ec", shared: false, step: 1  },
+  { key: "chicken_biryani_kids",  label: "Chicken Biryani – Kids",      note: "Kids portion · per head",            price: 199, priceLabel: "₹199 per head",         emoji: "🍚", bg: "#e8f5e9", shared: false, step: 1  },
+  { key: "chicken_biryani_adult", label: "Chicken Biryani – Adult",     note: "Full adult portion · per head",      price: 299, priceLabel: "₹299 per head",         emoji: "🍛", bg: "#e8f5e9", shared: false, step: 1  },
+  { key: "veg_package",           label: "Veg Package",                 note: "Per head · includes rice & sides",   price: 149, priceLabel: "₹149 per head",         emoji: "🥗", bg: "#e8f5e9", shared: false, step: 1  },
+  // ── Shareable ──
+  { key: "large_pizza",           label: "Large Pizza",                 note: "Serves 3 people · shareable",        price: 599, priceLabel: "₹599 each (serves 3)",   emoji: "🍕", bg: "#fff3e0", shared: true,  step: 1  },
+  { key: "fish_fingers",          label: "Fish Fingers",                note: "Shareable · sold in packs of 10",    price: 299, priceLabel: "₹299 per 10 pcs",       emoji: "🐟", bg: "#e3f2fd", shared: true,  step: 10 },
+  { key: "chicken_nuggets",       label: "Chicken Nuggets",             note: "Shareable · sold in packs of 10",    price: 249, priceLabel: "₹249 per 10 pcs",       emoji: "🍗", bg: "#fff8e1", shared: true,  step: 10 },
 ];
 
 const MotionBox = motion(Box);
@@ -345,45 +362,119 @@ function FoodCourtStep({
 }
 
 // ─── Step 5 ───────────────────────────────────────────────────────────────────
-function ExtraRoomsStep({
-  venue, state, setState,
+function FoodSelectionStep({
+  state, setState,
 }: {
-  venue: Venue | null;
   state: BookingState;
   setState: (s: Partial<BookingState>) => void;
 }) {
+  const setQty = (key: string, delta: number, step: number) => {
+    const current = state.foodSelections[key] ?? 0;
+    setState({ foodSelections: { ...state.foodSelections, [key]: Math.max(0, current + delta) } });
+  };
+
+  const itemCost = (m: (typeof FOOD_MENU)[number]) => {
+    const qty = state.foodSelections[m.key] ?? 0;
+    return m.step > 1 ? (qty / m.step) * m.price : m.price * qty;
+  };
+  const totalItems = Object.values(state.foodSelections).reduce((a, b) => a + b, 0);
+  const totalCost = FOOD_MENU.reduce((sum, m) => sum + itemCost(m), 0);
+
+  const personalItems = FOOD_MENU.filter((m) => !m.shared);
+  const shareableItems = FOOD_MENU.filter((m) => m.shared);
+
+  const renderCard = (item: (typeof FOOD_MENU)[number]) => {
+    const qty = state.foodSelections[item.key] ?? 0;
+    const cost = itemCost(item);
+    return (
+      <Grid item xs={12} sm={6} key={item.key}>
+        <Card
+          variant="outlined"
+          sx={{
+            borderRadius: 2,
+            border: qty > 0 ? `2px solid ${BRAND.gold}` : "1px solid",
+            borderColor: qty > 0 ? BRAND.gold : "divider",
+            overflow: "hidden",
+            transition: "box-shadow 0.2s",
+            boxShadow: qty > 0 ? 3 : 0,
+          }}
+        >
+          <Box
+            sx={{
+              bgcolor: item.bg,
+              height: 100,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 52,
+              userSelect: "none",
+              position: "relative",
+            }}
+          >
+            {item.emoji}
+            {item.shared && (
+              <Chip
+                label="Shareable"
+                size="small"
+                color="success"
+                sx={{ position: "absolute", top: 8, right: 8, fontWeight: 700, fontSize: "0.65rem" }}
+              />
+            )}
+          </Box>
+          <CardContent sx={{ pt: 1.5, pb: "12px !important" }}>
+            <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+              {item.label}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+              {item.note}
+            </Typography>
+            <Typography variant="body2" fontWeight={700} color="secondary.dark" sx={{ mb: 1.5 }}>
+              {item.priceLabel}
+            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <IconButton size="small" onClick={() => setQty(item.key, -item.step, item.step)} disabled={qty === 0}>
+                  <Remove fontSize="small" />
+                </IconButton>
+                <Typography variant="h6" sx={{ minWidth: 32, textAlign: "center", fontWeight: 700 }}>
+                  {qty}
+                </Typography>
+                <IconButton size="small" onClick={() => setQty(item.key, item.step, item.step)}>
+                  <Add fontSize="small" />
+                </IconButton>
+              </Box>
+              {qty > 0 && (
+                <Chip size="small" label={`₹${cost.toLocaleString("en-IN")}`} color="secondary" />
+              )}
+            </Box>
+          </CardContent>
+        </Card>
+      </Grid>
+    );
+  };
+
   return (
     <Box>
       <Alert severity="info" sx={{ mb: 3 }}>
-        You already have 1 room included for free. Add extra rooms if you need more space.
+        <strong>Personal items</strong> are individual servings per head and not shareable.
+        {" "}<strong>Shareable items</strong> are ordered by quantity and enjoyed by the group.
       </Alert>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-        <Typography variant="subtitle1" fontWeight={700} sx={{ flex: 1 }}>
-          Extra Rooms
-        </Typography>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <IconButton
-            size="small"
-            onClick={() => setState({ extraRoomsCount: Math.max(0, state.extraRoomsCount - 1) })}
-            disabled={state.extraRoomsCount === 0}
-          >
-            <Remove />
-          </IconButton>
-          <Typography variant="h6" sx={{ minWidth: 32, textAlign: "center" }}>
-            {state.extraRoomsCount}
-          </Typography>
-          <IconButton
-            size="small"
-            onClick={() => setState({ extraRoomsCount: state.extraRoomsCount + 1 })}
-          >
-            <Add />
-          </IconButton>
-        </Box>
-      </Box>
-      {venue && state.extraRoomsCount > 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          ₹{venue.extra_room_hourly_rate.toLocaleString("en-IN")}/hr per room = ₹{(venue.extra_room_hourly_rate * state.extraRoomsCount * state.durationHours).toLocaleString("en-IN")} estimated
-        </Typography>
+
+      <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>🍽️ Personal Items (per head)</Typography>
+      <Grid container spacing={2} sx={{ mb: 4 }}>
+        {personalItems.map(renderCard)}
+      </Grid>
+
+      <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>🤝 Shareable Items</Typography>
+      <Grid container spacing={2}>
+        {shareableItems.map(renderCard)}
+      </Grid>
+
+      {totalItems > 0 && (
+        <Alert severity="success" sx={{ mt: 3 }}>
+          <strong>{totalItems} item{totalItems > 1 ? "s" : ""}</strong> selected · estimated food total:{" "}
+          <strong>₹{totalCost.toLocaleString("en-IN")}</strong>. The team will confirm availability before your event.
+        </Alert>
       )}
     </Box>
   );
@@ -452,19 +543,21 @@ function FavorsStep({
 
 // ─── Step 7 ───────────────────────────────────────────────────────────────────
 function OrderReviewStep({
-  state, priceBreakdown, catalogItems, venue, loadingPrice,
+  state, priceBreakdown, catalogItems, venue, loadingPrice, foodSubtotal,
 }: {
   state: BookingState;
   priceBreakdown: PriceBreakdownType | null;
   catalogItems: CatalogItem[];
   venue: Venue | null;
   loadingPrice: boolean;
+  foodSubtotal: number;
 }) {
   const formatDate = () => state.date ? state.date.format("DD MMM YYYY") : "";
   const formatTime = () => state.startTime ? state.startTime.format("hh:mm A") : "";
   const formatEndTime = () => state.startTime ? state.startTime.add(state.durationHours, "hour").format("hh:mm A") : "";
   const selectedAddons = catalogItems.filter((c) => state.addons.includes(c.id));
   const selectedFavors = catalogItems.filter((c) => (state.favors[c.id] ?? 0) > 0);
+  const selectedFood = FOOD_MENU.filter((m) => (state.foodSelections[m.key] ?? 0) > 0);
 
   return (
     <Grid container spacing={3}>
@@ -502,10 +595,29 @@ function OrderReviewStep({
               <Typography fontWeight={600}>{state.foodcourtTablesCount}</Typography>
             </Box>
           )}
-          {state.extraRoomsCount > 0 && (
-            <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-              <Typography color="text.secondary">Extra Rooms</Typography>
-              <Typography fontWeight={600}>{state.extraRoomsCount}</Typography>
+          {Object.entries(state.foodSelections).filter(([, q]) => q > 0).length > 0 && (
+            <Box>
+              <Typography color="text.secondary" variant="body2" gutterBottom>Food Selection:</Typography>
+              <Stack spacing={0.5}>
+                {selectedFood.map((m) => {
+                  const qty = state.foodSelections[m.key];
+                  const lineCost = m.step > 1 ? (qty / m.step) * m.price : m.price * qty;
+                  return (
+                    <Box key={m.key} sx={{ display: "flex", justifyContent: "space-between" }}>
+                      <Typography variant="body2">
+                        {m.emoji} {m.label}{m.step > 1 ? ` (×${qty} pcs)` : ` ×${qty}`}
+                      </Typography>
+                      <Typography variant="body2" fontWeight={600}>
+                        ₹{lineCost.toLocaleString("en-IN")}
+                      </Typography>
+                    </Box>
+                  );
+                })}
+                <Box sx={{ display: "flex", justifyContent: "space-between", pt: 0.5, borderTop: "1px dashed", borderColor: "divider" }}>
+                  <Typography variant="body2" fontWeight={700} color="text.secondary">Food subtotal</Typography>
+                  <Typography variant="body2" fontWeight={700}>₹{foodSubtotal.toLocaleString("en-IN")}</Typography>
+                </Box>
+              </Stack>
             </Box>
           )}
           {selectedFavors.length > 0 && (
@@ -534,7 +646,7 @@ function OrderReviewStep({
             <CircularProgress />
           </Box>
         ) : priceBreakdown ? (
-          <PriceBreakdown breakdown={priceBreakdown} venue={venue} />
+          <PriceBreakdown breakdown={priceBreakdown} venue={venue} foodSubtotal={foodSubtotal} />
         ) : null}
       </Grid>
     </Grid>
@@ -552,7 +664,7 @@ function GuestDetailsStep({
     <Grid container spacing={2}>
       <Grid item xs={12}>
         <Alert severity="info">
-          Continue as guest by providing your contact details. We will use these details for reservation communication.
+          Continue as guest by providing your contact details. No sign-in required — if you've booked with us before, just use the same email and we'll link it to your history.
         </Alert>
       </Grid>
       <Grid item xs={12} sm={6}>
@@ -580,6 +692,25 @@ function GuestDetailsStep({
           onChange={(e) => setGuestDetails({ ...guestDetails, phone: e.target.value })}
         />
       </Grid>
+      <Grid item xs={12} sm={6}>
+        <TextField
+          fullWidth
+          label="Estimated Number of Guests"
+          type="number"
+          inputProps={{ min: 1, max: 100 }}
+          value={guestDetails.estimatedGuests}
+          onChange={(e) => {
+            const val = e.target.value === "" ? "" : Math.min(100, Math.max(1, Number(e.target.value)));
+            setGuestDetails({ ...guestDetails, estimatedGuests: val });
+          }}
+          helperText="Maximum 100 guests (60 in party hall + 40 in viewing/food area)"
+        />
+      </Grid>
+      <Grid item xs={12}>
+        <Alert severity="info" icon={false}>
+          Don't worry, you can change this later. For now, plan for the maximum number of guests.
+        </Alert>
+      </Grid>
     </Grid>
   );
 }
@@ -593,6 +724,7 @@ function PaymentStep({
   submitError,
   createdBooking,
   onSubmit,
+  foodSubtotal,
 }: {
   state: BookingState;
   priceBreakdown: PriceBreakdownType | null;
@@ -602,8 +734,9 @@ function PaymentStep({
   submitError: string;
   createdBooking: Booking | null;
   onSubmit: () => void;
+  foodSubtotal: number;
 }) {
-  const total = priceBreakdown?.total ?? 0;
+  const total = (priceBreakdown?.total ?? 0) + foodSubtotal;
   const reservationAdvance = total * 0.1;
   const payableNow = Number.isFinite(reservationAdvance) ? reservationAdvance : 0;
 
@@ -620,6 +753,18 @@ function PaymentStep({
         {createdBooking && (
           <Alert severity="success" sx={{ mb: 2 }}>
             Booking confirmed. Confirmation code: <strong>{createdBooking.confirmation_code}</strong>
+            <Box sx={{ mt: 1 }}>
+              <Button
+                component={RouterLink}
+                to={`/modify-booking/${createdBooking.confirmation_code}`}
+                size="small"
+                variant="outlined"
+                color="success"
+                sx={{ fontWeight: 700 }}
+              >
+                View / Modify This Booking
+              </Button>
+            </Box>
           </Alert>
         )}
         <Stack spacing={1.2}>
@@ -669,7 +814,7 @@ export default function BookingFlow() {
   const [slotsError, setSlotsError] = useState("");
   const [priceBreakdown, setPriceBreakdown] = useState<PriceBreakdownType | null>(null);
   const [loadingPrice, setLoadingPrice] = useState(false);
-  const [guestDetails, setGuestDetails] = useState<GuestDetails>({ name: "", email: "", phone: "" });
+  const [guestDetails, setGuestDetails] = useState<GuestDetails>({ name: "", email: "", phone: "", estimatedGuests: "" });
   const [submittingBooking, setSubmittingBooking] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [createdBooking, setCreatedBooking] = useState<Booking | null>(null);
@@ -682,11 +827,17 @@ export default function BookingFlow() {
     foodcourtTablesCount: 0,
     foodcourtTableNotes: "",
     extraRoomsCount: 0,
+    foodSelections: {},
     favors: {},
   });
 
   const patchState = (patch: Partial<BookingState>) =>
     setBookingState((prev) => ({ ...prev, ...patch }));
+
+  const foodSubtotal = FOOD_MENU.reduce((sum, m) => {
+    const qty = bookingState.foodSelections[m.key] ?? 0;
+    return sum + (m.step > 1 ? (qty / m.step) * m.price : m.price * qty);
+  }, 0);
 
   const buildLineItems = useCallback((): LineItemInput[] => {
     return [
@@ -734,9 +885,9 @@ export default function BookingFlow() {
     void loadAvailableSlots(bookingState.date, bookingState.durationHours, venue.id);
   }, [bookingState.date, bookingState.durationHours, venue, loadAvailableSlots]);
 
-  // Build price breakdown when entering step 7
+  // Build price breakdown when entering step 7 (Order Review)
   useEffect(() => {
-    if (activeStep !== 6) return;
+    if (activeStep !== 7) return;
     if (!venue || !bookingState.startTime) return;
     setLoadingPrice(true);
 
@@ -776,6 +927,16 @@ export default function BookingFlow() {
         extra_rooms_count: bookingState.extraRoomsCount,
         foodcourt_tables_count: bookingState.foodcourtTablesCount,
         foodcourt_table_notes: bookingState.foodcourtTableNotes || undefined,
+        booking_notes: Object.entries(bookingState.foodSelections)
+          .filter(([, qty]) => qty > 0)
+          .map(([key, qty]) => {
+            const item = FOOD_MENU.find((m) => m.key === key);
+            if (!item) return null;
+            const cost = item.step > 1 ? (qty / item.step) * item.price : item.price * qty;
+            return `${item.label} × ${qty} (₹${cost})`;
+          })
+          .filter(Boolean)
+          .join(", ") || undefined,
         line_items: buildLineItems(),
       });
 
@@ -793,7 +954,7 @@ export default function BookingFlow() {
 
   const canProceed = useCallback((): boolean => {
     if (activeStep === 0) return !!(bookingState.date && bookingState.startTime);
-    if (activeStep === 7 && !user) {
+    if (activeStep === 1 && !user) {
       const emailOk = /^\S+@\S+\.\S+$/.test(guestDetails.email.trim());
       const phoneOk = guestDetails.phone.trim().length >= 8;
       return guestDetails.name.trim().length > 1 && emailOk && phoneOk;
@@ -817,8 +978,15 @@ export default function BookingFlow() {
           />
         );
       case 1:
-        return <IncludedItemsStep venue={venue} />;
+        return (
+          <GuestDetailsStep
+            guestDetails={guestDetails}
+            setGuestDetails={setGuestDetails}
+          />
+        );
       case 2:
+        return <IncludedItemsStep venue={venue} />;
+      case 3:
         return (
           <ServiceAddonsStep
             catalogItems={catalogItems}
@@ -827,13 +995,13 @@ export default function BookingFlow() {
             durationHours={bookingState.durationHours}
           />
         );
-      case 3:
-        return <FoodCourtStep venue={venue} state={bookingState} setState={patchState} />;
       case 4:
-        return <ExtraRoomsStep venue={venue} state={bookingState} setState={patchState} />;
+        return <FoodCourtStep venue={venue} state={bookingState} setState={patchState} />;
       case 5:
-        return <FavorsStep catalogItems={catalogItems} state={bookingState} setState={patchState} />;
+        return <FoodSelectionStep state={bookingState} setState={patchState} />;
       case 6:
+        return <FavorsStep catalogItems={catalogItems} state={bookingState} setState={patchState} />;
+      case 7:
         return (
           <OrderReviewStep
             state={bookingState}
@@ -841,13 +1009,7 @@ export default function BookingFlow() {
             catalogItems={catalogItems}
             venue={venue}
             loadingPrice={loadingPrice}
-          />
-        );
-      case 7:
-        return (
-          <GuestDetailsStep
-            guestDetails={guestDetails}
-            setGuestDetails={setGuestDetails}
+            foodSubtotal={foodSubtotal}
           />
         );
       case 8:
@@ -861,6 +1023,7 @@ export default function BookingFlow() {
             submitError={submitError}
             createdBooking={createdBooking}
             onSubmit={handleBookingSubmit}
+            foodSubtotal={foodSubtotal}
           />
         );
       default:
@@ -869,16 +1032,16 @@ export default function BookingFlow() {
   };
 
   const handleNext = () => {
-    if (activeStep === 6 && user) {
-      setActiveStep(8);
+    if (activeStep === 0 && user) {
+      setActiveStep(2);
       return;
     }
     setActiveStep((s) => Math.min(s + 1, STEPS.length - 1));
   };
 
   const handleBack = () => {
-    if (activeStep === 8 && user) {
-      setActiveStep(6);
+    if (activeStep === 2 && user) {
+      setActiveStep(0);
       return;
     }
     setActiveStep((s) => Math.max(0, s - 1));

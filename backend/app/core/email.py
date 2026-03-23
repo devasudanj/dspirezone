@@ -51,7 +51,7 @@ def _build_line_item_rows(booking: dict[str, Any]) -> list[str]:
     return rows
 
 
-def _build_text_body(booking: dict[str, Any], venue: dict[str, Any], intro: str) -> str:
+def _build_text_body(booking: dict[str, Any], venue: dict[str, Any], intro: str, modify_link: str = "") -> str:
     breakdown = booking.get("price_breakdown") or {}
     line_items = _build_line_item_rows(booking)
     details = [
@@ -87,6 +87,16 @@ def _build_text_body(booking: dict[str, Any], venue: dict[str, Any], intro: str)
     details.extend([
         "",
         f"Invoice total: {_format_currency(booking.get('total_price', 0))}",
+    ])
+
+    if modify_link:
+        details.extend([
+            "",
+            "Modify or update your booking (including remaining balance payment):",
+            modify_link,
+        ])
+
+    details.extend([
         "",
         "We will contact you if we need any clarification on the booking.",
         "",
@@ -95,7 +105,7 @@ def _build_text_body(booking: dict[str, Any], venue: dict[str, Any], intro: str)
     return "\n".join(details)
 
 
-def _build_html_body(booking: dict[str, Any], venue: dict[str, Any], intro: str) -> str:
+def _build_html_body(booking: dict[str, Any], venue: dict[str, Any], intro: str, modify_link: str = "") -> str:
     breakdown = booking.get("price_breakdown") or {}
     line_items = booking.get("line_items", [])
     line_items_html = "".join(
@@ -120,6 +130,21 @@ def _build_html_body(booking: dict[str, Any], venue: dict[str, Any], intro: str)
                         f"Notes: {escape(str(booking.get('foodcourt_table_notes') or 'None'))}"
             "</p>"
         )
+
+    modify_html = ""
+    if modify_link:
+        modify_html = f"""
+    <div style="margin:28px 0 0; padding:16px; background:#f5f0ff; border-radius:8px; border-left:4px solid #7c3aed;">
+      <p style="margin:0 0 8px; font-weight:bold;">Modify or Update Your Booking</p>
+      <p style="margin:0 0 12px; color:#555; font-size:14px;">
+        You can update your booking details, add selections, or pay your remaining balance using the link below.
+        Your confirmation code is required: <strong>{escape(str(booking.get('confirmation_code')))}</strong>
+      </p>
+      <a href="{escape(modify_link)}" style="display:inline-block; padding:10px 20px; background:#7c3aed; color:#fff; text-decoration:none; border-radius:6px; font-weight:bold;">
+        View &amp; Modify Booking
+      </a>
+      <p style="margin:10px 0 0; font-size:12px; color:#888;">Or copy this link: {escape(modify_link)}</p>
+    </div>"""
 
     return f"""
 <html>
@@ -156,6 +181,7 @@ def _build_html_body(booking: dict[str, Any], venue: dict[str, Any], intro: str)
 
     {foodcourt_html}
     {notes_html}
+    {modify_html}
 
     <p style="margin-top: 24px;">We will contact you if we need any clarification on the booking.</p>
     <p style="margin-top: 16px;">DspireZone</p>
@@ -281,6 +307,8 @@ def send_booking_confirmation_emails(booking: dict[str, Any], venue: dict[str, A
         logger.info("Booking email delivery skipped because no recipients were found")
         return
 
+    modify_link = f"{settings.SITE_BASE_URL}/modify-booking/{booking.get('confirmation_code')}"
+
     customer_intro = (
         "Thank you for your DspireZone booking. Your order has been received and the invoice details are below."
     )
@@ -295,8 +323,8 @@ def send_booking_confirmation_emails(booking: dict[str, Any], venue: dict[str, A
             _build_message(
                 customer_email,
                 f"DspireZone booking confirmation {booking.get('confirmation_code')}",
-                _build_text_body(booking, venue, customer_intro),
-                _build_html_body(booking, venue, customer_intro),
+                _build_text_body(booking, venue, customer_intro, modify_link),
+                _build_html_body(booking, venue, customer_intro, modify_link),
             )
         )
 
@@ -305,8 +333,8 @@ def send_booking_confirmation_emails(booking: dict[str, Any], venue: dict[str, A
             _build_message(
                 admin_email,
                 f"New DspireZone booking {booking.get('confirmation_code')}",
-                _build_text_body(booking, venue, admin_intro),
-                _build_html_body(booking, venue, admin_intro),
+                _build_text_body(booking, venue, admin_intro, modify_link),
+                _build_html_body(booking, venue, admin_intro, modify_link),
             )
         )
 
@@ -315,5 +343,50 @@ def send_booking_confirmation_emails(booking: dict[str, Any], venue: dict[str, A
     except Exception:
         logger.exception(
             "Failed to send booking confirmation emails for booking %s",
+            booking.get("confirmation_code"),
+        )
+
+
+def send_booking_reminder_email(
+    booking: dict[str, Any],
+    venue: dict[str, Any],
+    extra_recipients: list[str] | None = None,
+) -> None:
+    """Send a booking details reminder email to customer + any alt email addresses.
+
+    Called manually from the admin portal. Includes the modify/payment link.
+    """
+    recipients: list[str] = []
+    if booking.get("contact_email"):
+        recipients.append(booking["contact_email"])
+    for addr in (extra_recipients or []):
+        if addr and addr not in recipients:
+            recipients.append(addr)
+
+    if not recipients:
+        logger.warning("Reminder email skipped: no recipients for booking %s", booking.get("confirmation_code"))
+        return
+
+    modify_link = f"{settings.SITE_BASE_URL}/modify-booking/{booking.get('confirmation_code')}"
+    intro = (
+        "Here is a summary of your DspireZone booking. "
+        "You can use the link below to view, update your order, or pay your remaining balance."
+    )
+
+    messages: list[EmailMessage] = [
+        _build_message(
+            recipient,
+            f"Your DspireZone booking – {booking.get('confirmation_code')}",
+            _build_text_body(booking, venue, intro, modify_link),
+            _build_html_body(booking, venue, intro, modify_link),
+        )
+        for recipient in recipients
+    ]
+
+    try:
+        _send_messages(messages)
+    except Exception:
+        logger.exception(
+            "Failed to send reminder emails for booking %s",
             booking.get("confirmation_code"),
         )

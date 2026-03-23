@@ -1,4 +1,5 @@
 import os
+import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -8,13 +9,39 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from .bootstrap import ensure_baseline_data
-from .database import engine, Base
+from .database import engine, Base, SQLALCHEMY_DATABASE_URL
 from .routers import auth, venue, catalog, availability, bookings, admin, vendors, contact
+
+logger = logging.getLogger(__name__)
+
+
+def _run_migrations() -> None:
+    """Run Alembic migrations to head. Safe to call on every startup."""
+    try:
+        from alembic.config import Config
+        from alembic import command as alembic_command
+
+        # alembic.ini lives one directory above this package (i.e. backend/)
+        ini_path = Path(__file__).parent.parent / "alembic.ini"
+        if not ini_path.exists():
+            logger.warning("alembic.ini not found at %s – skipping migrations", ini_path)
+            return
+
+        cfg = Config(str(ini_path))
+        cfg.set_main_option("script_location", str(Path(__file__).parent.parent / "alembic"))
+        # Use the same normalized URL the engine uses (handles Azure /home/data path)
+        cfg.set_main_option("sqlalchemy.url", SQLALCHEMY_DATABASE_URL)
+        alembic_command.upgrade(cfg, "head")
+        logger.info("Alembic migrations applied to: %s", SQLALCHEMY_DATABASE_URL)
+    except Exception as exc:
+        logger.error("Alembic migration failed (app will still start): %s", exc)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create tables (idempotent; Alembic handles prod migrations)
+    # Run pending DB migrations before anything else
+    _run_migrations()
+    # Create any tables not yet managed by Alembic (idempotent)
     Base.metadata.create_all(bind=engine)
     ensure_baseline_data()
     yield

@@ -10,9 +10,15 @@ dist/
 build/
 .eggs/
 .venv/
+.venv311/
 venv/
 env/
 .env
+
+# Azure deploy staging / temp deploy artifacts
+.azure-deploy-staging/
+deploy.zip
+webapp-logs-dev/
 
 # SQLite databases
 *.db

@@ -1,3 +1,4 @@
+import json
 import secrets
 import string
 from datetime import datetime, timedelta
@@ -8,10 +9,14 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import (
-    Booking, BookingLineItem, BookingStatus, CatalogItem,
-    User, Venue, PriceType
+    Booking, BookingAuditLog, BookingLineItem, BookingStatus, CatalogItem,
+    Payment, User, UserRole, Venue, PriceType,
 )
-from ..schemas import BookingCreate, BookingOut, PriceBreakdown
+from ..schemas import (
+    BookingCreate, BookingOut, BookingOutWithPayments, BookingUpdate,
+    PaymentCreate, PaymentOut, PaymentsSummary, BookingAuditLogOut,
+    PriceBreakdown,
+)
 from ..deps import get_current_user, get_optional_user
 from ..core.availability import is_slot_available
 from ..core.pricing import (
@@ -117,18 +122,16 @@ def create_booking(
 
         existing_user = db.query(User).filter(User.email == payload.guest_email.lower()).first()
         if existing_user:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="An account already exists for this email. Please sign in to complete the booking.",
+            # Allow guest checkout with existing email — link booking to that account
+            booking_user = existing_user
+        else:
+            booking_user = User(
+                name=payload.guest_name,
+                email=payload.guest_email.lower(),
+                password_hash=get_password_hash(secrets.token_urlsafe(24)),
             )
-
-        booking_user = User(
-            name=payload.guest_name,
-            email=payload.guest_email.lower(),
-            password_hash=get_password_hash(secrets.token_urlsafe(24)),
-        )
-        db.add(booking_user)
-        db.flush()
+            db.add(booking_user)
+            db.flush()
 
         guest_notes.append(f"Guest phone: {payload.guest_phone}")
 
@@ -264,3 +267,325 @@ def get_booking(
     if current_user.role != UserRole.admin and booking.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     return serialize_booking(booking)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _total_paid(booking: Booking) -> float:
+    return sum(
+        p.amount for p in booking.payments if p.status == "completed"
+    )
+
+
+def serialize_booking_with_payments(booking: Booking, breakdown: PriceBreakdown | None = None) -> BookingOutWithPayments:
+    base = serialize_booking(booking, breakdown)
+    total_paid = _total_paid(booking)
+    remaining_due = max(0.0, booking.total_price - total_paid)
+    audit = [BookingAuditLogOut.model_validate(a) for a in booking.audit_logs]
+    return BookingOutWithPayments(
+        **base.model_dump(),
+        total_paid=total_paid,
+        remaining_due=remaining_due,
+        audit_logs=audit,
+    )
+
+
+def _build_line_items(payload_line_items, duration_hours: float, db: Session):
+    """Validate and build line item dicts + ORM objects from input."""
+    line_items_data = []
+    db_line_items = []
+    for li_input in payload_line_items:
+        cat_item: CatalogItem = db.get(CatalogItem, li_input.catalog_item_id)
+        if not cat_item or not cat_item.active:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Catalog item {li_input.catalog_item_id} not found or inactive",
+            )
+        lt = calculate_line_item_total(
+            cat_item.price,
+            cat_item.price_type.value,
+            li_input.quantity,
+            duration_hours,
+        )
+        li_data = {
+            "catalog_item_id": cat_item.id,
+            "item_type": cat_item.type.value,
+            "item_name": cat_item.name,
+            "quantity": li_input.quantity,
+            "unit_price": cat_item.price,
+            "price_type": cat_item.price_type.value,
+            "unit_label": cat_item.unit_label,
+            "line_total": lt,
+        }
+        line_items_data.append(li_data)
+        db_line_items.append(BookingLineItem(**li_data))
+    return line_items_data, db_line_items
+
+
+# ---------------------------------------------------------------------------
+# Lookup by confirmation code (public – no auth required)
+# ---------------------------------------------------------------------------
+
+@router.get("/by-code/{confirmation_code}", response_model=BookingOutWithPayments)
+def get_booking_by_code(
+    confirmation_code: str,
+    db: Session = Depends(get_db),
+):
+    """Fetch a booking by its confirmation code. No authentication required.
+    Anyone with the code can view the booking (works like a shareable link)."""
+    booking = (
+        db.query(Booking)
+        .filter(Booking.confirmation_code == confirmation_code.upper())
+        .first()
+    )
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    return serialize_booking_with_payments(booking)
+
+
+# ---------------------------------------------------------------------------
+# Update booking (confirmation_code is used as auth token)
+# ---------------------------------------------------------------------------
+
+@router.put("/{booking_id}", response_model=BookingOutWithPayments)
+def update_booking(
+    booking_id: int,
+    payload: BookingUpdate,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
+):
+    """Modify a confirmed booking. The confirmation_code in the payload acts as
+    the authorization credential — anyone holding the code may update."""
+    booking = db.get(Booking, booking_id)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    # Authorise: confirmation_code must match, OR requester is admin
+    is_admin = current_user and current_user.role == UserRole.admin
+    if not is_admin and booking.confirmation_code != payload.confirmation_code.upper():
+        raise HTTPException(status_code=403, detail="Invalid confirmation code")
+
+    if booking.status == BookingStatus.cancelled:
+        raise HTTPException(status_code=409, detail="Cannot modify a cancelled booking")
+
+    venue: Venue = db.get(Venue, booking.venue_id)
+
+    # --- Snapshot before change ---
+    snapshot = serialize_booking(booking).model_dump(mode="json")
+
+    # --- Determine new field values ---
+    new_date = payload.date or booking.date
+    new_duration = payload.duration_hours if payload.duration_hours is not None else (
+        # derive duration from existing times
+        (datetime.combine(booking.date, booking.end_time) -
+         datetime.combine(booking.date, booking.start_time)).seconds / 3600
+    )
+    new_start_time = payload.start_time or booking.start_time
+
+    if new_duration < venue.min_hours:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Minimum booking duration is {venue.min_hours} hours",
+        )
+
+    # Compute new end time
+    start_dt = datetime.combine(new_date, new_start_time)
+    end_dt = start_dt + timedelta(hours=new_duration)
+    new_end_time = end_dt.time()
+
+    # Check slot availability (exclude this booking's current slot)
+    slot_changed = (
+        new_date != booking.date
+        or new_start_time != booking.start_time
+        or new_end_time != booking.end_time
+    )
+    if slot_changed:
+        if not is_slot_available(db, venue.id, new_date, new_start_time, new_end_time, exclude_booking_id=booking.id):
+            raise HTTPException(
+                status_code=409,
+                detail="Selected time slot is no longer available. Please choose a different time.",
+            )
+
+    # --- Rebuild line items if provided ---
+    new_extra_rooms = payload.extra_rooms_count if payload.extra_rooms_count is not None else booking.extra_rooms_count
+    new_foodcourt_tables = payload.foodcourt_tables_count if payload.foodcourt_tables_count is not None else booking.foodcourt_tables_count
+
+    if payload.line_items is not None:
+        line_items_data, db_line_items = _build_line_items(payload.line_items, new_duration, db)
+        # Replace existing line items
+        for li in list(booking.line_items):
+            db.delete(li)
+        db.flush()
+        for li in db_line_items:
+            li.booking_id = booking.id
+            db.add(li)
+    else:
+        # Recalculate totals using existing line items data
+        line_items_data = [
+            {
+                "catalog_item_id": li.catalog_item_id,
+                "item_type": li.item_type,
+                "item_name": li.item_name,
+                "quantity": li.quantity,
+                "unit_price": li.unit_price,
+                "price_type": li.price_type,
+                "unit_label": li.unit_label,
+                "line_total": li.line_total,
+            }
+            for li in booking.line_items
+        ]
+        # Update line totals if duration changed
+        if new_duration != (snapshot.get("price_breakdown") or {}).get("duration_hours"):
+            for li_orm, li_data in zip(booking.line_items, line_items_data):
+                if li_data["price_type"] == "per_hour":
+                    new_lt = calculate_line_item_total(
+                        li_data["unit_price"], "per_hour", li_data["quantity"], new_duration
+                    )
+                    li_orm.line_total = new_lt
+                    li_data["line_total"] = new_lt
+
+    breakdown = calculate_booking_breakdown(
+        venue=venue,
+        duration_hours=new_duration,
+        line_items_data=line_items_data,
+        foodcourt_tables_count=new_foodcourt_tables,
+        extra_rooms_count=new_extra_rooms,
+    )
+
+    # --- Build change summary ---
+    changes = []
+    if new_date != booking.date:
+        changes.append(f"Date: {booking.date} → {new_date}")
+    if new_start_time != booking.start_time:
+        changes.append(f"Start time: {booking.start_time} → {new_start_time}")
+    if new_end_time != booking.end_time:
+        changes.append(f"End time: {booking.end_time} → {new_end_time}")
+    if new_extra_rooms != booking.extra_rooms_count:
+        changes.append(f"Extra rooms: {booking.extra_rooms_count} → {new_extra_rooms}")
+    if new_foodcourt_tables != booking.foodcourt_tables_count:
+        changes.append(f"Food court tables: {booking.foodcourt_tables_count} → {new_foodcourt_tables}")
+    old_total = booking.total_price
+    new_total = breakdown["total"]
+    if abs(old_total - new_total) > 0.01:
+        changes.append(f"Total price: ₹{old_total:,.0f} → ₹{new_total:,.0f}")
+    if payload.line_items is not None:
+        changes.append("Line items updated")
+    if payload.contact_name and payload.contact_name != booking.contact_name:
+        changes.append(f"Contact name updated")
+    if payload.contact_email and payload.contact_email != booking.contact_email:
+        changes.append(f"Contact email updated")
+    if payload.contact_phone and payload.contact_phone != booking.contact_phone:
+        changes.append(f"Contact phone updated")
+    if payload.notes is not None and payload.notes != booking.notes:
+        changes.append("Notes updated")
+    if not changes:
+        changes.append("No field changes detected")
+
+    # --- Record audit log ---
+    changed_by_user_id = current_user.id if current_user else None
+    changed_by_name = payload.changed_by_name or (current_user.name if current_user else "Guest")
+    audit_log = BookingAuditLog(
+        booking_id=booking.id,
+        previous_snapshot=json.dumps(snapshot, default=str),
+        changed_by_user_id=changed_by_user_id,
+        changed_by_name=changed_by_name,
+        change_summary="; ".join(changes),
+    )
+    db.add(audit_log)
+
+    # --- Apply updates ---
+    booking.date = new_date
+    booking.start_time = new_start_time
+    booking.end_time = new_end_time
+    booking.extra_rooms_count = new_extra_rooms
+    booking.foodcourt_tables_count = new_foodcourt_tables
+    booking.total_price = new_total
+    if payload.foodcourt_table_notes is not None:
+        booking.foodcourt_table_notes = payload.foodcourt_table_notes
+    if payload.notes is not None:
+        booking.notes = payload.notes
+    if payload.contact_name:
+        booking.contact_name = payload.contact_name
+    if payload.contact_email:
+        booking.contact_email = payload.contact_email.lower()
+    if payload.contact_phone:
+        booking.contact_phone = payload.contact_phone
+    if payload.alt_email is not None:
+        booking.alt_email = payload.alt_email.lower() if payload.alt_email else None
+    if payload.alt_phone is not None:
+        booking.alt_phone = payload.alt_phone or None
+
+    db.commit()
+    db.refresh(booking)
+
+    return serialize_booking_with_payments(booking, PriceBreakdown(**breakdown))
+
+
+# ---------------------------------------------------------------------------
+# Payment endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/{booking_id}/payments", response_model=PaymentsSummary)
+def get_booking_payments(
+    booking_id: int,
+    confirmation_code: str,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
+):
+    """List payments for a booking. Auth via confirmation_code query param or admin token."""
+    booking = db.get(Booking, booking_id)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    is_admin = current_user and current_user.role == UserRole.admin
+    if not is_admin and booking.confirmation_code != confirmation_code.upper():
+        raise HTTPException(status_code=403, detail="Invalid confirmation code")
+
+    payments = [PaymentOut.model_validate(p) for p in booking.payments]
+    total_paid = sum(p.amount for p in booking.payments if p.status == "completed")
+    remaining = max(0.0, booking.total_price - total_paid)
+    return PaymentsSummary(
+        payments=payments,
+        total_paid=total_paid,
+        booking_total=booking.total_price,
+        remaining_due=remaining,
+    )
+
+
+@router.post("/{booking_id}/payments", response_model=PaymentOut, status_code=status.HTTP_201_CREATED)
+def record_payment(
+    booking_id: int,
+    payload: PaymentCreate,
+    confirmation_code: str,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
+):
+    """Record a payment against a booking (dummy/demo payment flow).
+    Auth via confirmation_code query param or admin token."""
+    booking = db.get(Booking, booking_id)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    is_admin = current_user and current_user.role == UserRole.admin
+    if not is_admin and booking.confirmation_code != confirmation_code.upper():
+        raise HTTPException(status_code=403, detail="Invalid confirmation code")
+
+    if booking.status == BookingStatus.cancelled:
+        raise HTTPException(status_code=409, detail="Cannot record payment for a cancelled booking")
+
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Payment amount must be positive")
+
+    payment = Payment(
+        booking_id=booking.id,
+        amount=payload.amount,
+        status=payload.status,
+        payment_ref=payload.payment_ref,
+        notes=payload.notes,
+    )
+    db.add(payment)
+    db.commit()
+    db.refresh(payment)
+    return PaymentOut.model_validate(payment)

@@ -16,6 +16,8 @@ const Policies = lazy(() => import("./pages/Policies"));
 const Login = lazy(() => import("./pages/Login"));
 const Register = lazy(() => import("./pages/Register"));
 const MyBookings = lazy(() => import("./pages/MyBookings"));
+const ModifyBookingLookup = lazy(() => import("./pages/ModifyBookingLookup"));
+const ModifyBookingFlow = lazy(() => import("./pages/ModifyBookingFlow"));
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
 const AdminBookings = lazy(() => import("./pages/admin/AdminBookings"));
 const AdminBookingDetails = lazy(() => import("./pages/admin/AdminBookingDetails"));
@@ -49,6 +51,8 @@ export default function App() {
 
               {/* Authenticated user routes */}
               <Route path="/book" element={<BookingFlow />} />
+              <Route path="/modify-booking" element={<ModifyBookingLookup />} />
+              <Route path="/modify-booking/:code" element={<ModifyBookingFlow />} />
               <Route
                 path="/my-bookings"
                 element={

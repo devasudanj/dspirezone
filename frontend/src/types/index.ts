@@ -88,6 +88,8 @@ export interface Booking {
   contact_name?: string;
   contact_email?: string;
   contact_phone?: string;
+  alt_email?: string;
+  alt_phone?: string;
   notes?: string;
   created_at?: string;
   rooms_included_count: number;
@@ -113,6 +115,55 @@ export interface CreateBookingPayload {
   foodcourt_table_notes?: string;
   notes?: string;
   line_items: BookingLineItemInput[];
+}
+
+export interface Payment {
+  id: number;
+  booking_id: number;
+  amount: number;
+  status: string;
+  payment_ref?: string;
+  notes?: string;
+  created_at?: string;
+}
+
+export interface BookingAuditLog {
+  id: number;
+  booking_id: number;
+  changed_by_name?: string;
+  changed_at?: string;
+  change_summary?: string;
+}
+
+export interface BookingWithPayments extends Booking {
+  total_paid: number;
+  remaining_due: number;
+  audit_logs: BookingAuditLog[];
+}
+
+export interface PaymentsSummary {
+  payments: Payment[];
+  total_paid: number;
+  booking_total: number;
+  remaining_due: number;
+}
+
+export interface UpdateBookingPayload {
+  confirmation_code: string;
+  date?: string;
+  start_time?: string;
+  duration_hours?: number;
+  extra_rooms_count?: number;
+  foodcourt_tables_count?: number;
+  foodcourt_table_notes?: string;
+  notes?: string;
+  line_items?: BookingLineItemInput[];
+  contact_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  alt_email?: string;
+  alt_phone?: string;
+  changed_by_name?: string;
 }
 
 export interface WhatsIncluded {

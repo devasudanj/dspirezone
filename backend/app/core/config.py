@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     SMTP_USE_SSL: bool = False
     ORDER_CONFIRMATION_ADMIN_EMAIL: str = "admin@dspirezone.com"
+    SITE_BASE_URL: str = "https://dspirezone-app-dev.azurewebsites.net"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

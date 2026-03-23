@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -8,7 +8,7 @@ from ..models import (
     AvailabilityRule, BlackoutDate
 )
 from ..schemas import (
-    BookingOut, BookingStatusUpdate,
+    BookingOut, BookingStatusUpdate, BookingOutWithPayments,
     CatalogItemCreate, CatalogItemUpdate, CatalogItemOut,
     VenueOut, VenueUpdate,
     AvailabilityRuleCreate, AvailabilityRuleOut,
@@ -16,7 +16,8 @@ from ..schemas import (
 )
 from ..deps import get_admin_user
 from ..models import User
-from .bookings import serialize_booking
+from .bookings import serialize_booking, serialize_booking_with_payments
+from ..core.email import send_booking_reminder_email
 
 router = APIRouter()
 
@@ -223,3 +224,70 @@ def admin_update_booking_status(
     db.commit()
     db.refresh(booking)
     return serialize_booking(booking)
+
+
+@router.get("/bookings/{booking_id}", response_model=BookingOutWithPayments)
+def admin_get_booking(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_admin_user),
+):
+    booking = db.get(Booking, booking_id)
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    return serialize_booking_with_payments(booking)
+
+
+from pydantic import BaseModel as _BaseModel, EmailStr as _EmailStr
+
+class _AltContactUpdate(_BaseModel):
+    alt_email: Optional[str] = None
+    alt_phone: Optional[str] = None
+
+
+@router.patch("/bookings/{booking_id}/alt-contact", response_model=BookingOutWithPayments)
+def admin_update_alt_contact(
+    booking_id: int,
+    payload: _AltContactUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_admin_user),
+):
+    """Update alternate email / phone for a booking (admin only)."""
+    booking = db.get(Booking, booking_id)
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    if payload.alt_email is not None:
+        booking.alt_email = payload.alt_email.lower() if payload.alt_email else None
+    if payload.alt_phone is not None:
+        booking.alt_phone = payload.alt_phone or None
+    db.commit()
+    db.refresh(booking)
+    return serialize_booking_with_payments(booking)
+
+
+@router.post("/bookings/{booking_id}/resend-email", status_code=202)
+def admin_resend_booking_email(
+    booking_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_admin_user),
+):
+    """Send (or resend) the booking details + modify-link email to the customer
+    email and, if set, the alternate email address."""
+    booking = db.get(Booking, booking_id)
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    venue = db.get(Venue, booking.venue_id)
+    if not venue:
+        raise HTTPException(404, "Venue not found")
+
+    from .bookings import serialize_booking as _sb
+    booking_dict = _sb(booking).model_dump(mode="json")
+    venue_dict = {"name": venue.name, "address": venue.address}
+
+    extra: list[str] = []
+    if booking.alt_email:
+        extra.append(booking.alt_email)
+
+    background_tasks.add_task(send_booking_reminder_email, booking_dict, venue_dict, extra)
+    return {"message": "Email queued for delivery"}

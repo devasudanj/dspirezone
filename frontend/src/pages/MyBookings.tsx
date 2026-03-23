@@ -4,7 +4,7 @@ import {
   CircularProgress, Alert, Grid, Avatar, Button, Divider,
   Stack,
 } from "@mui/material";
-import { CalendarMonth, ConfirmationNumber, AccessTime } from "@mui/icons-material";
+import { CalendarMonth, ConfirmationNumber, AccessTime, Edit } from "@mui/icons-material";
 import { Link as RouterLink } from "react-router-dom";
 import { format } from "date-fns";
 import api from "../api/client";
@@ -94,6 +94,20 @@ function BookingCard({ booking }: { booking: Booking }) {
               ))}
             </Stack>
           </>
+        )}
+        {booking.status !== "cancelled" && (
+          <Box sx={{ mt: 2 }}>
+            <Button
+              component={RouterLink}
+              to={`/modify-booking/${booking.confirmation_code}`}
+              variant="outlined"
+              size="small"
+              startIcon={<Edit />}
+              sx={{ fontWeight: 700 }}
+            >
+              Modify Booking
+            </Button>
+          </Box>
         )}
       </CardContent>
     </Card>

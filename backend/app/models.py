@@ -40,6 +40,13 @@ class TableRateType(str, enum.Enum):
     per_hour = "per_hour"
 
 
+class PaymentStatus(str, enum.Enum):
+    pending = "pending"
+    completed = "completed"
+    failed = "failed"
+    refunded = "refunded"
+
+
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
@@ -137,6 +144,8 @@ class Booking(Base):
     contact_name = Column(String(100))
     contact_email = Column(String(255), index=True)
     contact_phone = Column(String(40))
+    alt_email = Column(String(255))
+    alt_phone = Column(String(40))
     notes = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     # Room info
@@ -149,6 +158,8 @@ class Booking(Base):
     user = relationship("User", back_populates="bookings")
     venue = relationship("Venue", back_populates="bookings")
     line_items = relationship("BookingLineItem", back_populates="booking", cascade="all, delete-orphan")
+    payments = relationship("Payment", back_populates="booking", order_by="Payment.created_at", cascade="all, delete-orphan")
+    audit_logs = relationship("BookingAuditLog", back_populates="booking", order_by="BookingAuditLog.changed_at", cascade="all, delete-orphan")
 
 
 class BookingLineItem(Base):
@@ -181,3 +192,31 @@ class VendorInquiry(Base):
     previous_experience = Column(Text)
     healthy_concept = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=False)
+    amount = Column(Float, nullable=False)
+    status = Column(Enum(PaymentStatus), default=PaymentStatus.completed, nullable=False)
+    payment_ref = Column(String(255))  # external reference / intent ID
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    booking = relationship("Booking", back_populates="payments")
+
+
+class BookingAuditLog(Base):
+    __tablename__ = "booking_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=False)
+    previous_snapshot = Column(Text, nullable=False)   # JSON snapshot before change
+    changed_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    changed_by_name = Column(String(200))
+    changed_at = Column(DateTime(timezone=True), server_default=func.now())
+    change_summary = Column(Text)
+
+    booking = relationship("Booking", back_populates="audit_logs")
