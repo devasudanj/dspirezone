@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -268,7 +268,6 @@ def admin_update_alt_contact(
 @router.post("/bookings/{booking_id}/resend-email", status_code=202)
 def admin_resend_booking_email(
     booking_id: int,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _: User = Depends(get_admin_user),
 ):
@@ -289,5 +288,8 @@ def admin_resend_booking_email(
     if booking.alt_email:
         extra.append(booking.alt_email)
 
-    background_tasks.add_task(send_booking_reminder_email, booking_dict, venue_dict, extra)
-    return {"message": "Email queued for delivery"}
+    try:
+        send_booking_reminder_email(booking_dict, venue_dict, extra, raise_on_error=True)
+    except Exception as exc:
+        raise HTTPException(500, f"Email send failed: {exc}")
+    return {"message": "Email sent successfully"}

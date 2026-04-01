@@ -10,6 +10,8 @@ import { BRAND } from "../theme";
 import api from "../api/client";
 
 const MotionBox = motion(Box);
+const WHATSAPP_NUMBER = "+19522975060";
+const WHATSAPP_CHAT_LINK = `https://wa.me/${WHATSAPP_NUMBER.replace(/[^\d]/g, "")}?text=${encodeURIComponent("Hi DspireZone, I need help with my booking.")}`;
 
 export default function Contact() {
   const [form, setForm] = useState({ name: "", email: "", phone: "", message: "" });
@@ -67,7 +69,7 @@ export default function Contact() {
               {[
                 { icon: <LocationOn />, label: "Address", text: "30 Srinivasa Perumal Sannathi, Anna Salai\nNew Perungalathur, Chennai – 600 063\nTamil Nadu" },
                 { icon: <Email />, label: "Email", text: "hello@dspirezone.com" },
-                { icon: <Phone />, label: "Phone", text: "+91 98765 43210" },
+                { icon: <Phone />, label: "Phone", text: "+91 80654 81150" },
                 { icon: <AccessTime />, label: "Hours", text: "Mon–Fri: 10am–9pm\nSat–Sun: 9am–10pm" },
               ].map((item, i) => (
                 <Box key={i} sx={{ display: "flex", gap: 2 }}>
@@ -80,7 +82,48 @@ export default function Contact() {
               ))}
             </Stack>
 
-            <Box sx={{ mt: 4 }}>
+            {/* 24x7 Booking Assistant highlight */}
+            <Box
+              component="a"
+              href="tel:+918065481150"
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                mt: 4,
+                mb: 3,
+                p: 2,
+                borderRadius: 2,
+                background: `linear-gradient(135deg, ${BRAND.purpleDark}ee 0%, ${BRAND.purple}ee 100%)`,
+                color: "white",
+                textDecoration: "none",
+                boxShadow: "0 4px 14px rgba(74,14,143,0.25)",
+                "&:hover": { boxShadow: "0 6px 20px rgba(74,14,143,0.35)" },
+              }}
+            >
+              <Avatar sx={{ bgcolor: "rgba(255,255,255,0.2)", color: "white", width: 48, height: 48 }}>
+                <Phone />
+              </Avatar>
+              <Box>
+                <Typography fontWeight={800} fontSize={15}>Booking Assistant</Typography>
+                <Typography fontWeight={700} fontSize={18} lineHeight={1.2}>+91 80654 81150</Typography>
+                <Typography fontSize={12} sx={{ opacity: 0.85, mt: 0.3 }}>📞 Available 24×7 for venue space booking</Typography>
+              </Box>
+            </Box>
+
+            <Box sx={{ mt: 0 }}>
+              <Typography fontWeight={700} sx={{ mb: 1 }}>Chat With Us</Typography>
+              <Button
+                component="a"
+                href={WHATSAPP_CHAT_LINK}
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="contained"
+                sx={{ mb: 2, bgcolor: "#25D366", "&:hover": { bgcolor: "#1eb85a" } }}
+              >
+                WhatsApp Chat
+              </Button>
+
               <Typography fontWeight={700} sx={{ mb: 1.5 }}>Follow Us</Typography>
               <Stack direction="row" spacing={1}>
                 <IconButton

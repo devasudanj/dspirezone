@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 
 from ..core.config import settings
@@ -84,7 +84,11 @@ def _send_contact_email(payload: ContactMessage) -> None:
 
 
 @router.post("", status_code=status.HTTP_204_NO_CONTENT)
-def submit_contact(payload: ContactMessage, background_tasks: BackgroundTasks):
+def submit_contact(payload: ContactMessage):
     if not payload.name.strip() or not payload.message.strip():
         raise HTTPException(status_code=400, detail="Name and message are required")
-    background_tasks.add_task(_send_contact_email, payload)
+    try:
+        _send_contact_email(payload)
+    except Exception as exc:
+        logger.exception("Contact form email failed for %s", payload.email)
+        raise HTTPException(status_code=500, detail=f"Failed to send message: {exc}")

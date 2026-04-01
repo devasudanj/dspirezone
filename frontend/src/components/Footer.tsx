@@ -4,6 +4,9 @@ import { Facebook, Instagram, Twitter, YouTube, Email, Phone, LocationOn } from 
 import logoSvg from "../assets/logo/dspirezone-logo.svg";
 import { BRAND } from "../theme";
 
+const WHATSAPP_NUMBER = "+19522975060";
+const WHATSAPP_CHAT_LINK = `https://wa.me/${WHATSAPP_NUMBER.replace(/[^\d]/g, "")}?text=${encodeURIComponent("Hi DspireZone, I need help with my booking.")}`;
+
 const FOOTER_LINKS = {
   "Quick Links": [
     { label: "Home", href: "/" },
@@ -125,6 +128,19 @@ export default function Footer() {
                 <Phone sx={{ fontSize: 18, opacity: 0.7 }} />
                 <Typography variant="body2" sx={{ opacity: 0.7 }}>
                   +91 98765 43210
+                </Typography>
+              </Box>
+              <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+                <Typography variant="body2" sx={{ opacity: 0.85 }}>
+                  <Link
+                    href={WHATSAPP_CHAT_LINK}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    underline="none"
+                    sx={{ color: BRAND.gold, fontWeight: 700, "&:hover": { color: "white" } }}
+                  >
+                    WhatsApp Chat
+                  </Link>
                 </Typography>
               </Box>
             </Stack>

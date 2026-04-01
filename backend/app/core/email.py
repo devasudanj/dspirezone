@@ -351,10 +351,12 @@ def send_booking_reminder_email(
     booking: dict[str, Any],
     venue: dict[str, Any],
     extra_recipients: list[str] | None = None,
+    raise_on_error: bool = False,
 ) -> None:
     """Send a booking details reminder email to customer + any alt email addresses.
 
     Called manually from the admin portal. Includes the modify/payment link.
+    Set raise_on_error=True to surface exceptions to the caller instead of swallowing them.
     """
     recipients: list[str] = []
     if booking.get("contact_email"):
@@ -390,3 +392,5 @@ def send_booking_reminder_email(
             "Failed to send reminder emails for booking %s",
             booking.get("confirmation_code"),
         )
+        if raise_on_error:
+            raise

@@ -26,7 +26,13 @@ import {
   Dashboard,
   Logout,
   EventAvailable,
+  Phone,
 } from "@mui/icons-material";
+import Chip from "@mui/material/Chip";
+import Tooltip from "@mui/material/Tooltip";
+
+const BOOKING_PHONE = "+918065481150";
+const BOOKING_PHONE_DISPLAY = "+91 80654 81150";
 import { Link as RouterLink, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import logoSvg from "../assets/logo/dspirezone-logo.svg";
@@ -112,6 +118,29 @@ export default function Navbar() {
               )}
 
               <Box sx={{ flexGrow: isMobile ? 1 : 0 }} />
+
+              {/* Booking Assistant phone – desktop */}
+              {!isMobile && (
+                <Tooltip title="Call us 24×7 for venue space booking" arrow>
+                  <Chip
+                    component="a"
+                    href={`tel:${BOOKING_PHONE}`}
+                    icon={<Phone sx={{ fontSize: 16 }} />}
+                    label={`Booking Assistant · ${BOOKING_PHONE_DISPLAY}`}
+                    clickable
+                    size="small"
+                    sx={{
+                      mr: 2,
+                      bgcolor: `${BRAND.purple}12`,
+                      color: BRAND.purple,
+                      fontWeight: 600,
+                      border: `1px solid ${BRAND.purple}40`,
+                      "& .MuiChip-icon": { color: BRAND.purple },
+                      "&:hover": { bgcolor: `${BRAND.purple}22` },
+                    }}
+                  />
+                </Tooltip>
+              )}
 
               {/* Auth buttons */}
               {!isMobile && (
@@ -242,6 +271,31 @@ export default function Navbar() {
             </ListItemButton>
           ))}
         </List>
+        {/* Booking Assistant phone – mobile drawer */}
+        <Box
+          component="a"
+          href={`tel:${BOOKING_PHONE}`}
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            px: 2,
+            py: 1.2,
+            mb: 1,
+            borderRadius: 2,
+            bgcolor: `${BRAND.purple}10`,
+            border: `1px solid ${BRAND.purple}30`,
+            color: BRAND.purple,
+            textDecoration: "none",
+          }}
+        >
+          <Phone sx={{ fontSize: 18 }} />
+          <Box>
+            <Box sx={{ fontWeight: 700, fontSize: 13 }}>Booking Assistant</Box>
+            <Box sx={{ fontSize: 12 }}>{BOOKING_PHONE_DISPLAY} · 24×7</Box>
+          </Box>
+        </Box>
+
         <Divider sx={{ my: 2 }} />
         {user ? (
           <>
