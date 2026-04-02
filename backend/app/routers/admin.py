@@ -18,6 +18,7 @@ from ..deps import get_admin_user
 from ..models import User
 from .bookings import serialize_booking, serialize_booking_with_payments
 from ..core.email import send_booking_reminder_email
+from ..core.cal_com import cancel_cal_booking
 
 router = APIRouter()
 
@@ -220,9 +221,14 @@ def admin_update_booking_status(
     booking = db.get(Booking, booking_id)
     if not booking:
         raise HTTPException(404, "Booking not found")
+    old_status = booking.status
     booking.status = payload.status
     db.commit()
     db.refresh(booking)
+    # If transitioning to cancelled, also cancel in cal.com
+    if payload.status == BookingStatus.cancelled and old_status != BookingStatus.cancelled:
+        if booking.cal_booking_uid:
+            cancel_cal_booking(booking.cal_booking_uid, reason="Cancelled by admin")
     return serialize_booking(booking)
 
 

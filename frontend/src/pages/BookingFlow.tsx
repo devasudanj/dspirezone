@@ -874,7 +874,7 @@ export default function BookingFlow() {
     ]).then(([vRes, cRes]) => {
       setVenue(vRes.data);
       setCatalogItems(cRes.data);
-      setBookingState((prev) => ({ ...prev, durationHours: Math.max(2, vRes.data.min_hours) }));
+      setBookingState((prev) => ({ ...prev, durationHours: Math.max(prev.durationHours, vRes.data.min_hours) }));
     }).finally(() => setLoadingData(false));
   }, []);
 

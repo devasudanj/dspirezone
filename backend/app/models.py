@@ -148,6 +148,8 @@ class Booking(Base):
     alt_phone = Column(String(40))
     notes = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Cal.com integration
+    cal_booking_uid = Column(String(100), nullable=True)
     # Room info
     rooms_included_count = Column(Integer, default=1)
     extra_rooms_count = Column(Integer, default=0)

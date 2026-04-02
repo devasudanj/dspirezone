@@ -25,6 +25,7 @@ from ..core.pricing import (
 )
 from ..core.email import send_booking_confirmation_emails
 from ..core.security import get_password_hash
+from ..core.cal_com import create_cal_booking
 
 router = APIRouter()
 
@@ -225,6 +226,20 @@ def create_booking(
 
     db.commit()
     db.refresh(booking)
+
+    # Mirror to cal.com (best-effort; failure does not block local booking)
+    cal_uid = create_cal_booking(
+        booking_date=booking.date,
+        start_time=booking.start_time,
+        end_time=booking.end_time,
+        name=booking.contact_name or booking_user.name,
+        email=booking.contact_email or booking_user.email,
+        confirmation_code=code,
+        total_price=booking.total_price,
+    )
+    if cal_uid:
+        booking.cal_booking_uid = cal_uid
+        db.commit()
 
     response = serialize_booking(booking, PriceBreakdown(**breakdown))
     background_tasks.add_task(

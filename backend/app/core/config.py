@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     SMTP_USE_SSL: bool = False
     ORDER_CONFIRMATION_ADMIN_EMAIL: str = "admin@dspirezone.com"
     SITE_BASE_URL: str = "https://dspirezone-app-dev.azurewebsites.net"
+    # Cal.com integration
+    CAL_API_KEY: Optional[str] = None
+    CAL_BASE_URL: str = "https://cal.com/dspirezone/dspirebooking"
+    CAL_EVENT_SLUG: str = "dspirebooking"  # Fallback slug if not parseable from CAL_BASE_URL
+    CAL_EVENT_TYPE_ID: Optional[int] = None  # Set this to skip slug lookup entirely
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
