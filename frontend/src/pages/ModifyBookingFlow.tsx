@@ -428,7 +428,7 @@ export default function ModifyBookingFlow() {
                             return (
                               <Chip
                                 key={slot}
-                                label={`${start.format("hh:mm A")} - ${end.format("hh:mm A")}${isCurrentBooking ? " (current)" : ""}`}
+                                label={`${start.format("hh:mm A")} - ${end.format("hh:mm A")} IST${isCurrentBooking ? " (current)" : ""}`}
                                 color={isSelected ? "secondary" : isCurrentBooking ? "primary" : "default"}
                                 variant={isSelected ? "filled" : "outlined"}
                                 clickable
@@ -730,7 +730,7 @@ export default function ModifyBookingFlow() {
                   <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
                     <Typography variant="body2" fontWeight={700}>{log.changed_by_name ?? "Unknown"}</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {log.changed_at ? dayjs(log.changed_at).format("DD MMM YYYY, hh:mm A") : ""}
+                      {log.changed_at ? dayjs(log.changed_at).tz("Asia/Kolkata").format("DD MMM YYYY, hh:mm A") + " IST" : ""}
                     </Typography>
                   </Box>
                   <Typography variant="body2" color="text.secondary">{log.change_summary}</Typography>

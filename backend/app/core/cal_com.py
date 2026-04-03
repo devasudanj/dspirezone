@@ -283,14 +283,12 @@ def create_cal_booking(
 
     try:
         start_utc = _to_utc_iso(booking_date, start_time)
+        end_utc = _to_utc_iso(booking_date, end_time)
 
-        # v1 booking payload
-        # Note: cal.com v1 requires end = start + event-type-length exactly.
-        # Since venue bookings have variable durations, we omit "end" and let
-        # cal.com derive it from the configured event-type length (60 min).
         body = {
             "eventTypeId": etype_id,
             "start": start_utc,
+            "end": end_utc,
             "responses": {
                 "name": name,
                 "email": email,
@@ -326,6 +324,26 @@ def create_cal_booking(
             "cal.com: create_cal_booking failed (code=%s): %s", confirmation_code, exc
         )
         return None
+
+
+def is_cal_booking_cancelled(booking_ref: str) -> bool:
+    """
+    Return True if the cal.com booking is CANCELLED (or not found).
+    Returns False if it is still active, or if cal.com is unreachable.
+
+    booking_ref -- numeric booking ID stored in cal_booking_uid column.
+    """
+    if not _is_enabled() or not booking_ref:
+        return False
+
+    try:
+        data = _get(f"/bookings/{booking_ref}")
+        booking = data.get("booking") or data
+        status = (booking.get("status") or "").upper()
+        return status == "CANCELLED"
+    except Exception as exc:
+        logger.warning("cal.com: is_cal_booking_cancelled failed (ref=%s): %s", booking_ref, exc)
+        return False
 
 
 def cancel_cal_booking(booking_ref: str, reason: str = "Cancelled") -> bool:

@@ -61,13 +61,13 @@ def venue(db):
 
 class TestCheckOverlap:
     def test_no_overlap_before(self):
-        """New booking ends before existing starts (no buffer issue)."""
-        # existing: 12:00-14:00 with 30-min buffer → blocked until 14:30
-        # new: 10:00-11:30 → no overlap
+        """New booking ends before the pre-buffer zone starts."""
+        # existing: 12:00-14:00 with 30-min buffer → blocked from 11:30 to 14:30
+        # new: 10:00-11:30 → ends exactly at pre-buffer edge → allowed
         assert not check_overlap(time(10, 0), time(11, 30), time(12, 0), time(14, 0), 30)
 
     def test_no_overlap_after_buffer(self):
-        """New booking starts exactly after buffer period."""
+        """New booking starts exactly after post-buffer period."""
         # existing: 10:00-12:00 + 30min buffer → blocked until 12:30
         # new: 12:30-14:30 → OK
         assert not check_overlap(time(12, 30), time(14, 30), time(10, 0), time(12, 0), 30)
@@ -75,8 +75,20 @@ class TestCheckOverlap:
     def test_overlap_within_buffer(self):
         """New booking starts inside the buffer zone of existing booking."""
         # existing: 10:00-12:00 + 30min buffer → blocked until 12:30
-        # new: 12:15-14:15 → overlaps buffer
+        # new: 12:15-14:15 → overlaps post-buffer
         assert check_overlap(time(12, 15), time(14, 15), time(10, 0), time(12, 0), 30)
+
+    def test_overlap_pre_buffer(self):
+        """New booking ends inside the pre-buffer zone (30 min before existing start)."""
+        # existing: 10:00-12:00, pre-buffer starts at 09:30
+        # new: 08:00-10:00 → ends at 10:00 which is > pre-buffer edge 09:30 → BLOCKED
+        assert check_overlap(time(8, 0), time(10, 0), time(10, 0), time(12, 0), 30)
+
+    def test_no_overlap_ends_at_pre_buffer_edge(self):
+        """New booking ending exactly at pre-buffer edge (9:30) is allowed."""
+        # existing: 10:00-12:00, 30-min buffer → pre-buffer edge = 09:30
+        # new ends at exactly 09:30 → NOT overlapping (strict >)
+        assert not check_overlap(time(7, 30), time(9, 30), time(10, 0), time(12, 0), 30)
 
     def test_direct_overlap(self):
         """New booking directly overlaps existing booking."""
@@ -95,7 +107,7 @@ class TestCheckOverlap:
         assert not check_overlap(time(12, 30), time(14, 30), time(10, 0), time(12, 0), 30)
 
     def test_adjacent_bookings_with_buffer_one_min_short(self):
-        """29-min gap → overlaps buffer."""
+        """29-min gap after existing end → overlaps buffer."""
         assert check_overlap(time(12, 29), time(14, 29), time(10, 0), time(12, 0), 30)
 
 
@@ -109,12 +121,11 @@ class TestGetAvailableSlots:
         test_date = date(2026, 4, 6)  # Monday
         slots, is_blackout, _ = get_available_slots(db, venue.id, test_date, 2.0)
         assert not is_blackout
-        # 09:00 – 19:00 in 30-min steps with 2h duration → slot 09:00 to 18:30 start
+        # 09:00 – 19:00 in 30-min steps with 2h duration → slots 09:00 to 19:00 start
         assert len(slots) > 0
         assert time(9, 0) in slots
-        assert time(18, 30) in slots  # last valid start (18:30 + 2h = 20:30 <= 21:00)
-        assert time(19, 0) not in slots  # 19:00 + 2h = 21:00 is exactly the limit
-        # boundary: 19:00 + 2h = 21:00 = end of window → should be included
+        assert time(18, 30) in slots  # 18:30 + 2h = 20:30 <= 21:00 → valid
+        # boundary: 19:00 + 2h = 21:00 = end of window → included (<=)
         assert time(19, 0) in slots
 
     def test_no_slots_on_blackout(self, db, venue):
@@ -147,11 +158,11 @@ class TestGetAvailableSlots:
         slots, _, _ = get_available_slots(db, venue.id, date(2026, 4, 8), 2.0)
         # 10:00 start overlaps directly
         assert time(10, 0) not in slots
-        # 09:00 + 2h = 11:00 → 11:00 > 10:00 (existing start) → overlap
+        # 09:00 + 2h = 11:00 → 11:00 > 09:30 (pre-buffer edge) → overlap → blocked
         assert time(9, 0) not in slots
-        # 10:30 start → 10:30 < 12:30 (buffered end) and 12:30 > 10:00 → overlap
+        # 10:30 start → 10:30 < 12:30 (post-buffer) → overlap → blocked
         assert time(10, 30) not in slots
-        # 12:30 exactly after buffer → available
+        # 12:30 exactly after post-buffer → available
         assert time(12, 30) in slots
 
     def test_multiple_bookings_leave_gap(self, db, venue):

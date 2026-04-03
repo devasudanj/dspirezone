@@ -24,15 +24,20 @@ def check_overlap(
     buffer_minutes: int,
 ) -> bool:
     """
-    Returns True if new booking [new_start, new_end) overlaps with
-    existing booking [existing_start, existing_end + buffer).
+    Returns True if new booking [new_start, new_end) overlaps with the
+    buffered zone of an existing booking:
+      [existing_start - buffer, existing_end + buffer)
+
+    A 30-min buffer is applied both before and after each booked event,
+    matching the cal.com "before/after event buffer" setting.
     All times are on the same date.
     """
     ref = date(2000, 1, 1)
+    buf = timedelta(minutes=buffer_minutes)
     ns = _to_dt(ref, new_start)
     ne = _to_dt(ref, new_end)
-    es = _to_dt(ref, existing_start)
-    ee = _to_dt(ref, existing_end) + timedelta(minutes=buffer_minutes)
+    es = _to_dt(ref, existing_start) - buf   # pre-event buffer
+    ee = _to_dt(ref, existing_end) + buf     # post-event buffer
     return ns < ee and ne > es
 
 

@@ -392,7 +392,7 @@ export default function AdminBookingDetails() {
                         <Typography variant="body2" sx={{ fontWeight: 600 }}>{log.change_summary}</Typography>
                         <Typography variant="caption" color="text.secondary">
                           {log.changed_by_name ? `${log.changed_by_name} · ` : ""}
-                          {log.changed_at ? new Date(log.changed_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : ""}
+                          {log.changed_at ? new Date(log.changed_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }) + " IST" : ""}
                         </Typography>
                       </Stack>
                     </Box>

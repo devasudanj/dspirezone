@@ -103,7 +103,7 @@ function DateTimeStep({
     if (!state.date) return slot;
     const start = dayjs(`${state.date.format("YYYY-MM-DD")}T${slot}`);
     const end = start.add(state.durationHours, "hour");
-    return `${start.format("hh:mm A")} - ${end.format("hh:mm A")}`;
+    return `${start.format("hh:mm A")} - ${end.format("hh:mm A")} IST`;
   };
 
   return (
@@ -171,7 +171,7 @@ function DateTimeStep({
         {state.date && state.startTime && (
           <Grid item xs={12}>
             <Alert severity="success">
-              Selected time window: {state.startTime.format("hh:mm A")} - {state.startTime.add(state.durationHours, "hour").format("hh:mm A")} ({state.durationHours} hours)
+              Selected time window: {state.startTime.format("hh:mm A")} - {state.startTime.add(state.durationHours, "hour").format("hh:mm A")} IST ({state.durationHours} hours)
             </Alert>
           </Grid>
         )}
@@ -553,8 +553,8 @@ function OrderReviewStep({
   foodSubtotal: number;
 }) {
   const formatDate = () => state.date ? state.date.format("DD MMM YYYY") : "";
-  const formatTime = () => state.startTime ? state.startTime.format("hh:mm A") : "";
-  const formatEndTime = () => state.startTime ? state.startTime.add(state.durationHours, "hour").format("hh:mm A") : "";
+  const formatTime = () => state.startTime ? state.startTime.format("hh:mm A") + " IST" : "";
+  const formatEndTime = () => state.startTime ? state.startTime.add(state.durationHours, "hour").format("hh:mm A") + " IST" : "";
   const selectedAddons = catalogItems.filter((c) => state.addons.includes(c.id));
   const selectedFavors = catalogItems.filter((c) => (state.favors[c.id] ?? 0) > 0);
   const selectedFood = FOOD_MENU.filter((m) => (state.foodSelections[m.key] ?? 0) > 0);
@@ -769,7 +769,7 @@ function PaymentStep({
         )}
         <Stack spacing={1.2}>
           <Typography><strong>Event Date:</strong> {state.date?.format("DD MMM YYYY")}</Typography>
-          <Typography><strong>Time Window:</strong> {state.startTime?.format("hh:mm A")} - {state.startTime?.add(state.durationHours, "hour").format("hh:mm A")}</Typography>
+          <Typography><strong>Time Window:</strong> {state.startTime?.format("hh:mm A")} - {state.startTime?.add(state.durationHours, "hour").format("hh:mm A")} IST</Typography>
           <Typography><strong>Duration:</strong> {state.durationHours} hours</Typography>
           <Typography><strong>Booked By:</strong> {user ? user.name : guestDetails.name}</Typography>
           <Typography><strong>Email:</strong> {user ? user.email : guestDetails.email}</Typography>

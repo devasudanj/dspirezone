@@ -18,16 +18,57 @@ from ..schemas import (
     PriceBreakdown,
 )
 from ..deps import get_current_user, get_optional_user
-from ..core.availability import is_slot_available
+from ..core.availability import is_slot_available, check_overlap
 from ..core.pricing import (
     calculate_booking_breakdown,
     calculate_line_item_total,
 )
 from ..core.email import send_booking_confirmation_emails
 from ..core.security import get_password_hash
-from ..core.cal_com import create_cal_booking
+from ..core.cal_com import create_cal_booking, get_cal_available_times
 
 router = APIRouter()
+
+
+def _reconcile_cal_cancelled(
+    db: Session,
+    venue_id: int,
+    booking_date,
+    start_time,
+    end_time,
+    duration_hours: float,
+) -> bool:
+    """
+    Called when is_slot_available() returns False (local DB conflict).
+
+    If cal.com shows the slot as available it means a booking was cancelled
+    directly in cal.com without going through our admin panel, leaving the
+    local DB out of sync.  In that case we auto-cancel the stale local
+    booking(s) and return True so the new booking can proceed.
+
+    Returns False when cal.com also considers the slot unavailable.
+    """
+    cal_slots = get_cal_available_times(booking_date, int(duration_hours * 60))
+    if cal_slots is None or start_time not in cal_slots:
+        return False
+
+    venue = db.get(Venue, venue_id)
+    buf = venue.buffer_minutes if venue else 30
+    conflicting = (
+        db.query(Booking)
+        .filter(
+            Booking.venue_id == venue_id,
+            Booking.date == booking_date,
+            Booking.status == BookingStatus.confirmed,
+        )
+        .all()
+    )
+    for bk in conflicting:
+        if check_overlap(start_time, end_time, bk.start_time, bk.end_time, buf):
+            bk.status = BookingStatus.cancelled
+            bk.notes = (bk.notes or "") + "\n[Auto-cancelled: synced from cal.com cancellation]"
+    db.flush()
+    return True
 
 
 def _gen_code() -> str:
@@ -149,10 +190,15 @@ def create_booking(
 
     # Check availability
     if not is_slot_available(db, venue.id, payload.date, payload.start_time, end_time):
-        raise HTTPException(
-            status_code=409,
-            detail="Selected time slot is not available",
-        )
+        # Local DB says unavailable — check whether cal.com freed this slot
+        # (booking cancelled in cal.com but not yet synced to local DB)
+        if not _reconcile_cal_cancelled(
+            db, venue.id, payload.date, payload.start_time, end_time, payload.duration_hours
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Selected time slot is not available",
+            )
 
     # Build line items
     line_items_data = []
@@ -418,10 +464,13 @@ def update_booking(
     )
     if slot_changed:
         if not is_slot_available(db, venue.id, new_date, new_start_time, new_end_time, exclude_booking_id=booking.id):
-            raise HTTPException(
-                status_code=409,
-                detail="Selected time slot is no longer available. Please choose a different time.",
-            )
+            if not _reconcile_cal_cancelled(
+                db, venue.id, new_date, new_start_time, new_end_time, new_duration
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Selected time slot is no longer available. Please choose a different time.",
+                )
 
     # --- Rebuild line items if provided ---
     new_extra_rooms = payload.extra_rooms_count if payload.extra_rooms_count is not None else booking.extra_rooms_count
