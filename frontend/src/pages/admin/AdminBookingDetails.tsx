@@ -28,7 +28,7 @@ import {
 import { Link as RouterLink, useParams } from "react-router-dom";
 import api from "../../api/client";
 import { BRAND } from "../../theme";
-import type { BookingWithPayments } from "../../types";
+import type { BookingWithPayments, RazorpayInvoiceOut } from "../../types";
 
 const STATUS_COLOR: Record<string, "success" | "warning" | "error" | "default"> = {
   confirmed: "success",
@@ -63,6 +63,11 @@ export default function AdminBookingDetails() {
   // Copy link snackbar
   const [linkCopied, setLinkCopied] = useState(false);
 
+  // Invoice
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [invoiceData, setInvoiceData] = useState<RazorpayInvoiceOut | null>(null);
+  const [invoiceError, setInvoiceError] = useState("");
+
   useEffect(() => {
     if (!bookingId) { setError("Missing booking id."); setLoading(false); return; }
     api
@@ -71,6 +76,16 @@ export default function AdminBookingDetails() {
         setBooking(res.data);
         setAltEmail(res.data.alt_email ?? "");
         setAltPhone(res.data.alt_phone ?? "");
+        // Pre-fill invoice if already generated
+        if (res.data.razorpay_invoice_id && res.data.razorpay_invoice_short_url) {
+          setInvoiceData({
+            invoice_id: res.data.razorpay_invoice_id,
+            short_url: res.data.razorpay_invoice_short_url,
+            status: "generated",
+            amount: res.data.total_price,
+            booking_id: res.data.id,
+          });
+        }
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load booking details."))
       .finally(() => setLoading(false));
@@ -119,6 +134,25 @@ export default function AdminBookingDetails() {
       setEmailError(err instanceof Error ? err.message : "Failed to send email.");
     } finally {
       setSendingEmail(false);
+    }
+  };
+
+  const handleGenerateInvoice = async () => {
+    if (!booking) return;
+    setInvoiceLoading(true);
+    setInvoiceError("");
+    try {
+      const res = await api.post<RazorpayInvoiceOut>("/payments/invoice", {
+        booking_id: booking.id,
+      });
+      setInvoiceData(res.data);
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        (err instanceof Error ? err.message : "Failed to generate invoice.");
+      setInvoiceError(msg);
+    } finally {
+      setInvoiceLoading(false);
     }
   };
 
@@ -380,7 +414,7 @@ export default function AdminBookingDetails() {
               </Grid>
             </Grid>
 
-            {/* ── Payment History ── */}
+            {/* ── Change History ── */}
             {booking.audit_logs.length > 0 && (
               <Paper sx={{ p: 3, borderRadius: 3 }}>
                 <Typography variant="h6" fontWeight={700} gutterBottom>Change History</Typography>
@@ -400,6 +434,63 @@ export default function AdminBookingDetails() {
                 </Stack>
               </Paper>
             )}
+
+            {/* ── Invoice ── */}
+            <Paper sx={{ p: 3, borderRadius: 3 }}>
+              <Typography variant="h6" fontWeight={700} gutterBottom>Invoice</Typography>
+              <Divider sx={{ mb: 2 }} />
+              {invoiceData ? (
+                <Stack spacing={1.5}>
+                  <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+                    <CheckCircle sx={{ color: "success.main", fontSize: 20 }} />
+                    <Typography variant="body2" color="success.main" fontWeight={600}>
+                      Invoice {invoiceData.invoice_id} generated
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ textTransform: "capitalize" }}>
+                      ({invoiceData.status})
+                    </Typography>
+                  </Stack>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    startIcon={<OpenInNew />}
+                    href={invoiceData.short_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    sx={{ alignSelf: "flex-start", bgcolor: BRAND.purple, "&:hover": { bgcolor: "#3a0a72" } }}
+                  >
+                    View Invoice
+                  </Button>
+                  <Button
+                    variant="text"
+                    size="small"
+                    onClick={handleGenerateInvoice}
+                    disabled={invoiceLoading}
+                    sx={{ alignSelf: "flex-start" }}
+                  >
+                    {invoiceLoading ? "Refreshing…" : "Refresh Invoice Status"}
+                  </Button>
+                </Stack>
+              ) : (
+                <Stack spacing={1.5}>
+                  <Typography variant="body2" color="text.secondary">
+                    Generate a Razorpay-hosted invoice for this booking.
+                  </Typography>
+                  {invoiceError && (
+                    <Typography variant="body2" color="error">{invoiceError}</Typography>
+                  )}
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={handleGenerateInvoice}
+                    disabled={invoiceLoading}
+                    sx={{ alignSelf: "flex-start", bgcolor: BRAND.purple, "&:hover": { bgcolor: "#3a0a72" } }}
+                  >
+                    {invoiceLoading ? "Generating…" : "Generate Invoice"}
+                  </Button>
+                </Stack>
+              )}
+            </Paper>
 
           </Stack>
         ) : (

@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from .bootstrap import ensure_baseline_data
 from .database import engine, Base, SQLALCHEMY_DATABASE_URL
-from .routers import auth, venue, catalog, availability, bookings, admin, vendors, contact
+from .routers import auth, venue, catalog, availability, bookings, admin, vendors, contact, payments
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ app.include_router(availability.router, prefix="/api/availability", tags=["avail
 app.include_router(bookings.router, prefix="/api/bookings", tags=["bookings"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(vendors.router, prefix="/api/vendors", tags=["vendors"])
+app.include_router(payments.router, prefix="/api/payments", tags=["payments"])
 app.include_router(contact.router, prefix="/api/contact", tags=["contact"])
 
 

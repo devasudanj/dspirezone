@@ -75,6 +75,46 @@ const FOOD_MENU = [
 
 const MotionBox = motion(Box);
 
+// ─── Razorpay types & script loader ──────────────────────────────────────────
+interface RazorpayOrderOut {
+  razorpay_order_id: string;
+  amount: number;       // INR (human-readable, e.g. 1500.00)
+  currency: string;
+  razorpay_key_id: string;
+  booking_id: number;
+  payment_id: number;
+}
+
+interface RzpOptions {
+  key: string;
+  amount: number;       // paise
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  prefill?: { name?: string; email?: string; contact?: string };
+  theme?: { color?: string };
+  handler: (r: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => void;
+  modal?: { ondismiss?: () => void };
+}
+
+declare global {
+  interface Window {
+    Razorpay: new (options: RzpOptions) => { open(): void };
+  }
+}
+
+function loadRazorpayScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof window.Razorpay !== "undefined") { resolve(); return; }
+    const s = document.createElement("script");
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("Failed to load Razorpay Checkout"));
+    document.head.appendChild(s);
+  });
+}
+
 // ─── Loading skeleton ─────────────────────────────────────────────────────────
 function StepSkeleton() {
   return (
@@ -747,12 +787,12 @@ function PaymentStep({
           Reservation Checkout
         </Typography>
         <Alert severity="info" sx={{ mb: 2 }}>
-          This confirms the booking immediately using the demo payment flow. The reserved time will be blocked from future bookings.
+          A <strong>10% advance</strong> is charged now via Razorpay to secure your slot. The remaining balance is due before or on the event day.
         </Alert>
         {submitError && <Alert severity="error" sx={{ mb: 2 }}>{submitError}</Alert>}
         {createdBooking && (
           <Alert severity="success" sx={{ mb: 2 }}>
-            Booking confirmed. Confirmation code: <strong>{createdBooking.confirmation_code}</strong>
+            Payment received! Booking confirmed. Confirmation code: <strong>{createdBooking.confirmation_code}</strong>
             <Box sx={{ mt: 1 }}>
               <Button
                 component={RouterLink}
@@ -790,7 +830,11 @@ function PaymentStep({
             <Typography fontWeight={800} color="secondary.main">₹{payableNow.toLocaleString("en-IN")}</Typography>
           </Box>
           <Button fullWidth variant="contained" color="secondary" sx={{ fontWeight: 700 }} onClick={onSubmit} disabled={submitting || !!createdBooking}>
-            {createdBooking ? "Booking Confirmed" : submitting ? "Confirming Booking..." : "Proceed (Dummy Payment)"}
+            {createdBooking
+              ? "Payment Confirmed ✓"
+              : submitting
+              ? "Processing…"
+              : `Pay ₹${payableNow.toLocaleString("en-IN")} via Razorpay`}
           </Button>
         </Paper>
       </Grid>
@@ -818,6 +862,8 @@ export default function BookingFlow() {
   const [submittingBooking, setSubmittingBooking] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [createdBooking, setCreatedBooking] = useState<Booking | null>(null);
+  // Holds a booking that was created but whose payment was abandoned — reused on retry
+  const [draftBooking, setDraftBooking] = useState<Booking | null>(null);
 
   const [bookingState, setBookingState] = useState<BookingState>({
     date: null,
@@ -915,42 +961,114 @@ export default function BookingFlow() {
     setSubmittingBooking(true);
     setSubmitError("");
 
+    // 10% advance — min ₹1 to satisfy Razorpay minimum
+    const total = (priceBreakdown?.total ?? 0) + foodSubtotal;
+    const advance = Math.max(1, Math.round(total * 0.1 * 100) / 100);
+
     try {
-      const response = await api.post<Booking>("/bookings", {
-        venue_id: venue.id,
-        date: bookingState.date.format("YYYY-MM-DD"),
-        start_time: bookingState.startTime.format("HH:mm"),
-        duration_hours: bookingState.durationHours,
-        guest_name: user ? undefined : guestDetails.name.trim(),
-        guest_email: user ? undefined : guestDetails.email.trim(),
-        guest_phone: user ? undefined : guestDetails.phone.trim(),
-        extra_rooms_count: bookingState.extraRoomsCount,
-        foodcourt_tables_count: bookingState.foodcourtTablesCount,
-        foodcourt_table_notes: bookingState.foodcourtTableNotes || undefined,
-        booking_notes: Object.entries(bookingState.foodSelections)
-          .filter(([, qty]) => qty > 0)
-          .map(([key, qty]) => {
-            const item = FOOD_MENU.find((m) => m.key === key);
-            if (!item) return null;
-            const cost = item.step > 1 ? (qty / item.step) * item.price : item.price * qty;
-            return `${item.label} × ${qty} (₹${cost})`;
-          })
-          .filter(Boolean)
-          .join(", ") || undefined,
-        line_items: buildLineItems(),
+      // ── Step 1: Create booking or reuse the draft from a previous failed attempt ──
+      let booking: Booking;
+      if (draftBooking) {
+        booking = draftBooking;
+      } else {
+        const response = await api.post<Booking>("/bookings", {
+          venue_id: venue.id,
+          date: bookingState.date.format("YYYY-MM-DD"),
+          start_time: bookingState.startTime.format("HH:mm"),
+          duration_hours: bookingState.durationHours,
+          guest_name: user ? undefined : guestDetails.name.trim(),
+          guest_email: user ? undefined : guestDetails.email.trim(),
+          guest_phone: user ? undefined : guestDetails.phone.trim(),
+          extra_rooms_count: bookingState.extraRoomsCount,
+          foodcourt_tables_count: bookingState.foodcourtTablesCount,
+          foodcourt_table_notes: bookingState.foodcourtTableNotes || undefined,
+          booking_notes: Object.entries(bookingState.foodSelections)
+            .filter(([, qty]) => qty > 0)
+            .map(([key, qty]) => {
+              const item = FOOD_MENU.find((m) => m.key === key);
+              if (!item) return null;
+              const cost = item.step > 1 ? (qty / item.step) * item.price : item.price * qty;
+              return `${item.label} × ${qty} (₹${cost})`;
+            })
+            .filter(Boolean)
+            .join(", ") || undefined,
+          line_items: buildLineItems(),
+        });
+        booking = response.data;
+        setDraftBooking(booking);
+      }
+
+      // ── Step 2: Create Razorpay order ──
+      const orderRes = await api.post<RazorpayOrderOut>("/payments/create-order", {
+        booking_id: booking.id,
+        confirmation_code: booking.confirmation_code,
+        amount: advance,
+      });
+      const orderData = orderRes.data;
+
+      // ── Step 3: Load Razorpay Checkout.js ──
+      await loadRazorpayScript();
+      setSubmittingBooking(false);  // release button while modal is open
+
+      // ── Step 4: Open Razorpay Checkout modal ──
+      const rzpInstance = new window.Razorpay({
+        key: orderData.razorpay_key_id,
+        amount: Math.round(orderData.amount * 100),  // INR → paise
+        currency: orderData.currency,
+        name: "DspireZone Events",
+        description: `Booking ${booking.confirmation_code} – 10% Advance`,
+        order_id: orderData.razorpay_order_id,
+        prefill: {
+          name: user?.name ?? guestDetails.name,
+          email: user?.email ?? guestDetails.email,
+          contact: !user ? guestDetails.phone : undefined,
+        },
+        theme: { color: BRAND.purple },
+        handler: (response) => {
+          // Called by Razorpay on successful payment
+          void (async () => {
+            setSubmittingBooking(true);
+            setSubmitError("");
+            try {
+              await api.post("/payments/verify", {
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              });
+              setCreatedBooking(booking);
+              setDraftBooking(null);
+              const refreshedSlots = await loadAvailableSlots(
+                bookingState.date!,
+                bookingState.durationHours,
+                venue.id,
+              );
+              if (!refreshedSlots.includes(bookingState.startTime!.format("HH:mm"))) {
+                patchState({ startTime: null });
+              }
+            } catch {
+              setSubmitError(
+                "Payment received but verification failed. Please contact support with your Payment ID: " +
+                  response.razorpay_payment_id,
+              );
+            } finally {
+              setSubmittingBooking(false);
+            }
+          })();
+        },
+        modal: {
+          ondismiss: () => {
+            // Booking exists in draft state — user can retry
+            setSubmitError("Payment window closed. Click the button below to try again.");
+          },
+        },
       });
 
-      setCreatedBooking(response.data);
-      const refreshedSlots = await loadAvailableSlots(bookingState.date, bookingState.durationHours, venue.id);
-      if (!refreshedSlots.includes(bookingState.startTime.format("HH:mm"))) {
-        patchState({ startTime: null });
-      }
+      rzpInstance.open();
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Unable to complete booking");
-    } finally {
+      setSubmitError(err instanceof Error ? err.message : "Unable to initiate payment");
       setSubmittingBooking(false);
     }
-  }, [venue, bookingState, user, guestDetails, buildLineItems, loadAvailableSlots]);
+  }, [venue, bookingState, user, guestDetails, buildLineItems, loadAvailableSlots, draftBooking, priceBreakdown, foodSubtotal]);
 
   const canProceed = useCallback((): boolean => {
     if (activeStep === 0) return !!(bookingState.date && bookingState.startTime);

@@ -98,6 +98,8 @@ export interface Booking {
   foodcourt_table_notes?: string;
   line_items: BookingLineItem[];
   price_breakdown?: PriceBreakdown;
+  razorpay_invoice_id?: string;
+  razorpay_invoice_short_url?: string;
 }
 
 export interface BookingLineItemInput {
@@ -146,6 +148,14 @@ export interface PaymentsSummary {
   total_paid: number;
   booking_total: number;
   remaining_due: number;
+}
+
+export interface RazorpayInvoiceOut {
+  invoice_id: string;
+  short_url: string;
+  status: string;
+  amount: number;
+  booking_id: number;
 }
 
 export interface UpdateBookingPayload {

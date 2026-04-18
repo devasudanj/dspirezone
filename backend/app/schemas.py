@@ -231,6 +231,8 @@ class BookingOut(BaseModel):
     foodcourt_table_notes: Optional[str] = None
     line_items: List[BookingLineItemOut] = []
     price_breakdown: Optional[PriceBreakdown] = None
+    razorpay_invoice_id: Optional[str] = None
+    razorpay_invoice_short_url: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -310,6 +312,53 @@ class BookingOutWithPayments(BookingOut):
     total_paid: float = 0.0
     remaining_due: float = 0.0
     audit_logs: List[BookingAuditLogOut] = []
+
+
+# ---------------------------------------------------------------------------
+# Razorpay / Payments
+# ---------------------------------------------------------------------------
+
+class RazorpayOrderCreate(BaseModel):
+    """Request body for POST /api/payments/create-order."""
+    booking_id: int
+    # Guests (not logged in) authenticate with the booking confirmation code.
+    # Logged-in owners/admins may leave this blank.
+    confirmation_code: Optional[str] = None
+    # If omitted the remaining outstanding balance on the booking is charged.
+    amount: Optional[float] = None
+
+
+class RazorpayOrderOut(BaseModel):
+    """Response from POST /api/payments/create-order – passed directly to Razorpay Checkout."""
+    razorpay_order_id: str
+    amount: float          # INR (human-readable, e.g. 1500.00)
+    currency: str
+    razorpay_key_id: str   # public key – safe to expose to the browser
+    booking_id: int
+    payment_id: int        # our internal Payment.id (pending record)
+
+
+class PaymentVerify(BaseModel):
+    """Request body for POST /api/payments/verify (frontend checkout callback)."""
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+class PaymentVerifyOut(BaseModel):
+    success: bool
+    payment_id: int
+    booking_id: int
+    amount: float
+    message: str
+
+
+class RazorpayInvoiceOut(BaseModel):
+    invoice_id: str
+    short_url: str
+    status: str
+    amount: float  # INR
+    booking_id: int
 
 
 # ---------------------------------------------------------------------------

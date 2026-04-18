@@ -31,6 +31,21 @@ class Settings(BaseSettings):
     CAL_EVENT_SLUG: str = "dspirebooking"  # Fallback slug if not parseable from CAL_BASE_URL
     CAL_EVENT_TYPE_ID: Optional[int] = None  # Set this to skip slug lookup entirely
 
+    # Zoho Books / Invoice integration
+    ZOHO_BASE_API_DOMAIN: str = "https://www.zohoapis.in"
+    ZOHO_ACCOUNTS_DOMAIN: str = "https://accounts.zoho.in"
+    ZOHO_CLIENT_ID: Optional[str] = None
+    ZOHO_CLIENT_SECRET: Optional[str] = None
+    ZOHO_REDIRECT_URI: str = "http://localhost:8000/zoho/callback"
+    ZOHO_REFRESH_TOKEN: Optional[str] = None  # Populated after first OAuth consent
+    ZOHO_ORGANIZATION_ID: Optional[str] = None  # Zoho Books org ID
+
+    # Razorpay payment gateway
+    RAZORPAY_KEY_ID: Optional[str] = None
+    RAZORPAY_KEY_SECRET: Optional[str] = None
+    RAZORPAY_WEBHOOK_SECRET: Optional[str] = None  # Set after creating webhook in Razorpay dashboard
+    RAZORPAY_CURRENCY: str = "INR"
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

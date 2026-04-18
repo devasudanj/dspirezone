@@ -21,10 +21,51 @@ import PriceBreakdown from "../components/PriceBreakdown";
 import { BRAND } from "../theme";
 import type {
   Venue, CatalogItem, AvailableSlot, PriceBreakdown as PriceBreakdownType,
-  BookingWithPayments, BookingLineItem, Payment, BookingAuditLog,
+  BookingWithPayments, BookingLineItem, Payment, BookingAuditLog, RazorpayInvoiceOut,
 } from "../types";
 
 // ─── Food menu (must exactly mirror BookingFlow.tsx) ─────────────────────────
+
+// ─── Razorpay types & script loader ──────────────────────────────────────────
+interface RazorpayOrderOut {
+  razorpay_order_id: string;
+  amount: number;
+  currency: string;
+  razorpay_key_id: string;
+  booking_id: number;
+  payment_id: number;
+}
+
+interface RzpOptions {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  prefill?: { name?: string; email?: string; contact?: string };
+  theme?: { color?: string };
+  handler: (r: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => void;
+  modal?: { ondismiss?: () => void };
+}
+
+declare global {
+  interface Window {
+    Razorpay: new (options: RzpOptions) => { open(): void };
+  }
+}
+
+function loadRazorpayScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof window.Razorpay !== "undefined") { resolve(); return; }
+    const s = document.createElement("script");
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("Failed to load Razorpay Checkout"));
+    document.head.appendChild(s);
+  });
+}
+
 const FOOD_MENU = [
   { key: "pizza_chicken",         label: "Personal Pizza – Chicken",    note: "Personal size · not shareable",      price: 199, priceLabel: "₹199 per item",         emoji: "🍕", bg: "#fff3e0", shared: false, step: 1  },
   { key: "pizza_veg",             label: "Personal Pizza – Veg",        note: "Personal size · not shareable",      price: 179, priceLabel: "₹179 per item",         emoji: "🍕", bg: "#f1f8e9", shared: false, step: 1  },
@@ -136,6 +177,11 @@ export default function ModifyBookingFlow() {
   const [payAmount, setPayAmount] = useState("");
   const [expanded, setExpanded] = useState<string | false>("datetime");
 
+  // Invoice
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [invoiceData, setInvoiceData] = useState<RazorpayInvoiceOut | null>(null);
+  const [invoiceError, setInvoiceError] = useState("");
+
   const patchState = (patch: Partial<ModifyState>) =>
     setState((prev) => prev ? { ...prev, ...patch } : null);
 
@@ -144,7 +190,18 @@ export default function ModifyBookingFlow() {
     if (booking) return;
     if (!code) { navigate("/modify-booking"); return; }
     api.get<BookingWithPayments>(`/bookings/by-code/${code.toUpperCase()}`)
-      .then((r) => setBooking(r.data))
+      .then((r) => {
+        setBooking(r.data);
+        if (r.data.razorpay_invoice_id && r.data.razorpay_invoice_short_url) {
+          setInvoiceData({
+            invoice_id: r.data.razorpay_invoice_id,
+            short_url: r.data.razorpay_invoice_short_url,
+            status: "generated",
+            amount: r.data.total_price,
+            booking_id: r.data.id,
+          });
+        }
+      })
       .catch(() => navigate("/modify-booking"))
       .finally(() => setLoadingData(false));
   }, [code, booking, navigate]);
@@ -289,27 +346,102 @@ export default function ModifyBookingFlow() {
     }
   };
 
-  const handleRecordPayment = async () => {
+  const handleGenerateInvoice = async () => {
     if (!booking || !code) return;
-    const amount = parseFloat(payAmount);
-    if (!amount || amount <= 0) { setPayError("Enter a valid payment amount."); return; }
+    setInvoiceLoading(true);
+    setInvoiceError("");
+    try {
+      const res = await api.post<RazorpayInvoiceOut>("/payments/invoice", {
+        booking_id: booking.id,
+        confirmation_code: code.toUpperCase(),
+      });
+      setInvoiceData(res.data);
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        (err instanceof Error ? err.message : "Failed to generate invoice.");
+      setInvoiceError(msg);
+    } finally {
+      setInvoiceLoading(false);
+    }
+  };
+
+  const launchRazorpay = async (amountInr: number) => {
+    if (!booking || !code) return;
+    if (amountInr < 1) { setPayError("Minimum payable amount is ₹1."); return; }
     setPaying(true);
     setPayError("");
     try {
-      await api.post(`/bookings/${booking.id}/payments?confirmation_code=${code.toUpperCase()}`, {
-        amount,
-        status: "completed",
-        notes: "Guest payment via modify flow",
+      // Step 1: Create Razorpay order
+      const orderRes = await api.post<RazorpayOrderOut>("/payments/create-order", {
+        booking_id: booking.id,
+        confirmation_code: code.toUpperCase(),
+        amount: amountInr,
       });
-      const refreshed = await api.get<BookingWithPayments>(`/bookings/by-code/${code.toUpperCase()}`);
-      setBooking(refreshed.data);
-      setPayDialogOpen(false);
-      setPayAmount("");
+      const orderData = orderRes.data;
+
+      // Step 2: Load Razorpay Checkout.js
+      await loadRazorpayScript();
+      setPaying(false); // release while modal is open
+
+      // Step 3: Open Razorpay modal
+      const rzpInstance = new window.Razorpay({
+        key: orderData.razorpay_key_id,
+        amount: Math.round(orderData.amount * 100), // INR → paise
+        currency: orderData.currency,
+        name: "DspireZone Events",
+        description: `Booking ${booking.confirmation_code} – Payment`,
+        order_id: orderData.razorpay_order_id,
+        prefill: {
+          name: state?.contactName || booking.contact_name || undefined,
+          email: state?.contactEmail || booking.contact_email || undefined,
+          contact: state?.contactPhone || booking.contact_phone || undefined,
+        },
+        theme: { color: BRAND.purple },
+        handler: (response) => {
+          void (async () => {
+            setPaying(true);
+            setPayError("");
+            try {
+              // Step 4: Verify payment signature
+              await api.post("/payments/verify", {
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              });
+              // Step 5: Refresh booking to reflect updated payment totals
+              const refreshed = await api.get<BookingWithPayments>(`/bookings/by-code/${code.toUpperCase()}`);
+              setBooking(refreshed.data);
+              setPayDialogOpen(false);
+              setPayAmount("");
+            } catch {
+              setPayError(
+                "Payment received but verification failed. Contact support with Payment ID: " +
+                  response.razorpay_payment_id,
+              );
+            } finally {
+              setPaying(false);
+            }
+          })();
+        },
+        modal: {
+          ondismiss: () => {
+            setPayError("Payment window closed. You can try again.");
+          },
+        },
+      });
+
+      rzpInstance.open();
     } catch (err) {
-      setPayError(err instanceof Error ? err.message : "Payment failed");
-    } finally {
+      setPayError(err instanceof Error ? err.message : "Unable to initiate payment");
       setPaying(false);
     }
+  };
+
+  const handleRazorpayPayment = async () => {
+    const amount = parseFloat(payAmount);
+    if (!amount || amount <= 0) { setPayError("Enter a valid payment amount."); return; }
+    await launchRazorpay(amount);
   };
 
   if (loadingData || !state || !venue) {
@@ -703,16 +835,28 @@ export default function ModifyBookingFlow() {
               {saving ? "Saving..." : "Save Changes"}
             </Button>
             {remainingDue > 0 && !isOverpaid && (
-              <Button
-                variant="contained"
-                color="secondary"
-                size="large"
-                startIcon={<PaymentIcon />}
-                onClick={() => { setPayAmount(remainingDue.toFixed(0)); setPayDialogOpen(true); }}
-                sx={{ flex: 1, fontWeight: 700 }}
-              >
-                Pay ₹{remainingDue.toLocaleString("en-IN")}
-              </Button>
+              <Box sx={{ flex: 1, display: "flex", flexDirection: "column", gap: 0.5 }}>
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  size="large"
+                  startIcon={paying ? <CircularProgress size={18} color="inherit" /> : <PaymentIcon />}
+                  onClick={() => void launchRazorpay(remainingDue)}
+                  disabled={paying}
+                  sx={{ width: "100%", fontWeight: 700 }}
+                >
+                  {paying ? "Processing…" : `Pay ₹${remainingDue.toLocaleString("en-IN")} via Razorpay`}
+                </Button>
+                <Button
+                  size="small"
+                  color="secondary"
+                  variant="text"
+                  onClick={() => { setPayAmount(""); setPayDialogOpen(true); }}
+                  sx={{ fontSize: "0.75rem", textTransform: "none" }}
+                >
+                  Pay a different / partial amount
+                </Button>
+              </Box>
             )}
           </Stack>
         </Paper>
@@ -739,15 +883,70 @@ export default function ModifyBookingFlow() {
             </Stack>
           </Paper>
         )}
+
+        {/* ── Invoice ────────────────────────────────────────────── */}
+        {booking && (
+          <Paper sx={{ mt: 3, p: 3, borderRadius: 3 }}>
+            <Typography variant="h6" fontWeight={700} gutterBottom>Invoice</Typography>
+            <Divider sx={{ mb: 2 }} />
+            {invoiceData ? (
+              <Stack spacing={1.5}>
+                <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+                  <CheckCircle sx={{ color: "success.main", fontSize: 20 }} />
+                  <Typography variant="body2" color="success.main" fontWeight={600}>
+                    Invoice {invoiceData.invoice_id}
+                  </Typography>
+                </Stack>
+                <Button
+                  variant="contained"
+                  size="small"
+                  href={invoiceData.short_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  sx={{ alignSelf: "flex-start", bgcolor: BRAND.purple, "&:hover": { bgcolor: "#3a0a72" } }}
+                >
+                  View Invoice
+                </Button>
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => void handleGenerateInvoice()}
+                  disabled={invoiceLoading}
+                  sx={{ alignSelf: "flex-start" }}
+                >
+                  {invoiceLoading ? "Refreshing…" : "Refresh Invoice Status"}
+                </Button>
+              </Stack>
+            ) : (
+              <Stack spacing={1.5}>
+                <Typography variant="body2" color="text.secondary">
+                  Download or view a hosted invoice for this booking.
+                </Typography>
+                {invoiceError && (
+                  <Typography variant="body2" color="error">{invoiceError}</Typography>
+                )}
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => void handleGenerateInvoice()}
+                  disabled={invoiceLoading}
+                  sx={{ alignSelf: "flex-start" }}
+                >
+                  {invoiceLoading ? "Generating…" : "Generate Invoice"}
+                </Button>
+              </Stack>
+            )}
+          </Paper>
+        )}
       </Container>
 
       {/* ── Payment Dialog ─────────────────────────────────────── */}
-      <Dialog open={payDialogOpen} onClose={() => setPayDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Record Payment</DialogTitle>
+      <Dialog open={payDialogOpen} onClose={() => { setPayDialogOpen(false); setPayError(""); }} maxWidth="xs" fullWidth>
+        <DialogTitle>Pay via Razorpay</DialogTitle>
         <DialogContent>
           {payError && <Alert severity="error" sx={{ mb: 2 }}>{payError}</Alert>}
           <Typography color="text.secondary" sx={{ mb: 2 }}>
-            Enter the amount you wish to pay now. Remaining due: <strong>₹{remainingDue.toLocaleString("en-IN")}</strong>
+            Enter the amount to pay now. Remaining due: <strong>₹{remainingDue.toLocaleString("en-IN")}</strong>
           </Typography>
           <TextField
             fullWidth
@@ -756,18 +955,20 @@ export default function ModifyBookingFlow() {
             inputProps={{ min: 1, max: remainingDue, step: 1 }}
             value={payAmount}
             onChange={(e) => setPayAmount(e.target.value)}
+            helperText="You can pay a partial or full amount."
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setPayDialogOpen(false)} disabled={paying}>Cancel</Button>
+          <Button onClick={() => { setPayDialogOpen(false); setPayError(""); }} disabled={paying}>Cancel</Button>
           <Button
             variant="contained"
             color="secondary"
-            onClick={handleRecordPayment}
-            disabled={paying}
-            startIcon={paying ? <CircularProgress size={16} color="inherit" /> : undefined}
+            onClick={handleRazorpayPayment}
+            disabled={paying || !payAmount}
+            startIcon={paying ? <CircularProgress size={16} color="inherit" /> : <PaymentIcon />}
+            sx={{ fontWeight: 700 }}
           >
-            {paying ? "Processing..." : "Confirm Payment"}
+            {paying ? "Processing…" : `Pay ₹${Number(payAmount || 0).toLocaleString("en-IN")} via Razorpay`}
           </Button>
         </DialogActions>
       </Dialog>

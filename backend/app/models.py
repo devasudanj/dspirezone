@@ -156,6 +156,9 @@ class Booking(Base):
     # Food court
     foodcourt_tables_count = Column(Integer, default=0)
     foodcourt_table_notes = Column(Text)
+    # Razorpay invoice
+    razorpay_invoice_id = Column(String(100), nullable=True)
+    razorpay_invoice_short_url = Column(String(500), nullable=True)
 
     user = relationship("User", back_populates="bookings")
     venue = relationship("Venue", back_populates="bookings")
