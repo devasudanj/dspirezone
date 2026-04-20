@@ -342,17 +342,26 @@ function ServiceAddonsStep({
 
 // ─── Step 4 ───────────────────────────────────────────────────────────────────
 function FoodCourtStep({
-  venue, state, setState,
+  venue, state, setState, estimatedGuests,
 }: {
   venue: Venue | null;
   state: BookingState;
   setState: (s: Partial<BookingState>) => void;
+  estimatedGuests: number | "";
 }) {
+  const guests = Number(estimatedGuests);
+  const minTables = guests > 0 ? Math.max(0, Math.ceil((guests - 20) / 20)) : 0;
+
   return (
     <Box>
       <Alert severity="info" sx={{ mb: 3 }}>
         Food court tables are a paid add-on. Reserve dedicated dining tables for your guests.
       </Alert>
+      {minTables > 0 && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          Based on your estimated <strong>{guests} guests</strong>, a minimum of <strong>{minTables} table{minTables > 1 ? "s" : ""}</strong> has been automatically added. You can increase up to a maximum of 4 tables.
+        </Alert>
+      )}
       <Grid container spacing={3}>
         <Grid item xs={12} sm={6}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
@@ -362,8 +371,8 @@ function FoodCourtStep({
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <IconButton
                 size="small"
-                onClick={() => setState({ foodcourtTablesCount: Math.max(0, state.foodcourtTablesCount - 1) })}
-                disabled={state.foodcourtTablesCount === 0}
+                onClick={() => setState({ foodcourtTablesCount: Math.max(minTables, state.foodcourtTablesCount - 1) })}
+                disabled={state.foodcourtTablesCount <= minTables}
               >
                 <Remove />
               </IconButton>
@@ -372,7 +381,8 @@ function FoodCourtStep({
               </Typography>
               <IconButton
                 size="small"
-                onClick={() => setState({ foodcourtTablesCount: state.foodcourtTablesCount + 1 })}
+                onClick={() => setState({ foodcourtTablesCount: Math.min(4, state.foodcourtTablesCount + 1) })}
+                disabled={state.foodcourtTablesCount >= 4}
               >
                 <Add />
               </IconButton>
@@ -745,6 +755,11 @@ function GuestDetailsStep({
           }}
           helperText="Maximum 100 guests (60 in party hall + 40 in viewing/food area)"
         />
+        {Number(guestDetails.estimatedGuests) > 80 && (
+          <Alert severity="warning" sx={{ mt: 1 }}>
+            <strong>Large party notice:</strong> The maximum party size is 100 guests. With {guestDetails.estimatedGuests} guests, some seating will be spread out into the food court area to accommodate everyone comfortably.
+          </Alert>
+        )}
       </Grid>
       <Grid item xs={12}>
         <Alert severity="info" icon={false}>
@@ -776,7 +791,9 @@ function PaymentStep({
   onSubmit: () => void;
   foodSubtotal: number;
 }) {
-  const total = (priceBreakdown?.total ?? 0) + foodSubtotal;
+  const preGstSubtotal = (priceBreakdown?.total ?? 0) + foodSubtotal;
+  const gstAmount = Math.round(preGstSubtotal * 0.18 * 100) / 100;
+  const total = Math.round((preGstSubtotal + gstAmount) * 100) / 100;
   const reservationAdvance = total * 0.1;
   const payableNow = Number.isFinite(reservationAdvance) ? reservationAdvance : 0;
 
@@ -787,7 +804,7 @@ function PaymentStep({
           Reservation Checkout
         </Typography>
         <Alert severity="info" sx={{ mb: 2 }}>
-          A <strong>10% advance</strong> is charged now via Razorpay to secure your slot. The remaining balance is due before or on the event day.
+          Choose to pay a <strong>10% advance</strong> now to secure your slot, or pay the <strong>full amount</strong> upfront. Any remaining balance is due before or on the event day.
         </Alert>
         {submitError && <Alert severity="error" sx={{ mb: 2 }}>{submitError}</Alert>}
         {createdBooking && (
@@ -826,16 +843,18 @@ function PaymentStep({
             <Typography fontWeight={700}>₹{total.toLocaleString("en-IN")}</Typography>
           </Box>
           <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
-            <Typography color="text.secondary">Pay 10% to Reserve</Typography>
+            <Typography color="text.secondary">Min. Advance (10%)</Typography>
             <Typography fontWeight={800} color="secondary.main">₹{payableNow.toLocaleString("en-IN")}</Typography>
           </Box>
-          <Button fullWidth variant="contained" color="secondary" sx={{ fontWeight: 700 }} onClick={onSubmit} disabled={submitting || !!createdBooking}>
-            {createdBooking
-              ? "Payment Confirmed ✓"
-              : submitting
-              ? "Processing…"
-              : `Pay ₹${payableNow.toLocaleString("en-IN")} via Razorpay`}
-          </Button>
+          {createdBooking ? (
+            <Button fullWidth variant="contained" color="success" disabled sx={{ fontWeight: 700 }}>
+              Payment Confirmed ✓
+            </Button>
+          ) : (
+            <Button fullWidth variant="contained" color="secondary" sx={{ fontWeight: 700 }} onClick={onSubmit} disabled={submitting}>
+              {submitting ? "Processing…" : "Pay via Razorpay"}
+            </Button>
+          )}
         </Paper>
       </Grid>
     </Grid>
@@ -931,6 +950,18 @@ export default function BookingFlow() {
     void loadAvailableSlots(bookingState.date, bookingState.durationHours, venue.id);
   }, [bookingState.date, bookingState.durationHours, venue, loadAvailableSlots]);
 
+  // Auto-set minimum food court tables based on estimated guests
+  // Rule: 0 tables for ≤20 guests; 1 table per extra 20 guests (or part thereof)
+  useEffect(() => {
+    const guests = Number(guestDetails.estimatedGuests);
+    if (!guests || guests <= 0) return;
+    const minTables = Math.max(0, Math.ceil((guests - 20) / 20));
+    setBookingState((prev) => ({
+      ...prev,
+      foodcourtTablesCount: Math.max(prev.foodcourtTablesCount, minTables),
+    }));
+  }, [guestDetails.estimatedGuests]);
+
   // Build price breakdown when entering step 7 (Order Review)
   useEffect(() => {
     if (activeStep !== 7) return;
@@ -961,9 +992,12 @@ export default function BookingFlow() {
     setSubmittingBooking(true);
     setSubmitError("");
 
-    // 10% advance — min ₹1 to satisfy Razorpay minimum
-    const total = (priceBreakdown?.total ?? 0) + foodSubtotal;
+    // Full order total with 18% GST (CGST 9% + SGST 9%, Tamil Nadu) — Razorpay shows Pay Full / Pay Minimum natively
+    const preGstSubtotal = (priceBreakdown?.total ?? 0) + foodSubtotal;
+    const gstAmt = Math.round(preGstSubtotal * 0.18 * 100) / 100;
+    const total = Math.round((preGstSubtotal + gstAmt) * 100) / 100;
     const advance = Math.max(1, Math.round(total * 0.1 * 100) / 100);
+    const fullAmount = Math.max(1, Math.round(total * 100) / 100);
 
     try {
       // ── Step 1: Create booking or reuse the draft from a previous failed attempt ──
@@ -982,7 +1016,7 @@ export default function BookingFlow() {
           extra_rooms_count: bookingState.extraRoomsCount,
           foodcourt_tables_count: bookingState.foodcourtTablesCount,
           foodcourt_table_notes: bookingState.foodcourtTableNotes || undefined,
-          booking_notes: Object.entries(bookingState.foodSelections)
+          notes: Object.entries(bookingState.foodSelections)
             .filter(([, qty]) => qty > 0)
             .map(([key, qty]) => {
               const item = FOOD_MENU.find((m) => m.key === key);
@@ -1002,7 +1036,8 @@ export default function BookingFlow() {
       const orderRes = await api.post<RazorpayOrderOut>("/payments/create-order", {
         booking_id: booking.id,
         confirmation_code: booking.confirmation_code,
-        amount: advance,
+        amount: fullAmount,
+        min_partial_amount: advance,
       });
       const orderData = orderRes.data;
 
@@ -1016,7 +1051,7 @@ export default function BookingFlow() {
         amount: Math.round(orderData.amount * 100),  // INR → paise
         currency: orderData.currency,
         name: "DspireZone Events",
-        description: `Booking ${booking.confirmation_code} – 10% Advance`,
+        description: `Booking ${booking.confirmation_code} – Pay Full or 10% Advance`,
         order_id: orderData.razorpay_order_id,
         prefill: {
           name: user?.name ?? guestDetails.name,
@@ -1114,7 +1149,7 @@ export default function BookingFlow() {
           />
         );
       case 4:
-        return <FoodCourtStep venue={venue} state={bookingState} setState={patchState} />;
+        return <FoodCourtStep venue={venue} state={bookingState} setState={patchState} estimatedGuests={guestDetails.estimatedGuests} />;
       case 5:
         return <FoodSelectionStep state={bookingState} setState={patchState} />;
       case 6:

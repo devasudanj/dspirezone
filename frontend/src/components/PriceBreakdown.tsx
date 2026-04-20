@@ -29,6 +29,12 @@ export default function PriceBreakdown({ breakdown, venue, durationHours, foodSu
   const dur = durationHours ?? breakdown.duration_hours ?? 0;
   const buffer = breakdown.buffer_minutes ?? venue?.buffer_minutes ?? 30;
 
+  // GST: Tamil Nadu — CGST 9% + SGST 9% = 18%
+  const preGstSubtotal = (breakdown.total ?? 0) + (foodSubtotal ?? 0);
+  const cgst = Math.round(preGstSubtotal * 0.09 * 100) / 100;
+  const sgst = Math.round(preGstSubtotal * 0.09 * 100) / 100;
+  const grandTotal = Math.round((preGstSubtotal + cgst + sgst) * 100) / 100;
+
   const rows = [
     {
       label: `Venue hire (${fmt((venue?.base_hourly_rate ?? 0))} × ${dur}h)`,
@@ -109,7 +115,41 @@ export default function PriceBreakdown({ breakdown, venue, durationHours, foodSu
               </TableRow>
             ))}
 
-            {rows.length === 0 && (
+            {preGstSubtotal > 0 && (
+              <>
+                <TableRow>
+                  <TableCell colSpan={2} sx={{ py: 0.5, px: 0 }}>
+                    <Divider />
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell sx={{ py: 0.75, color: "text.secondary", fontSize: 13 }}>
+                    Subtotal (excl. GST)
+                  </TableCell>
+                  <TableCell align="right" sx={{ py: 0.75, fontSize: 13 }}>
+                    {fmt(preGstSubtotal)}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell sx={{ py: 0.75, color: "text.secondary", fontSize: 13 }}>
+                    CGST @ 9% (Tamil Nadu)
+                  </TableCell>
+                  <TableCell align="right" sx={{ py: 0.75, fontSize: 13 }}>
+                    {fmt(cgst)}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell sx={{ py: 0.75, color: "text.secondary", fontSize: 13 }}>
+                    SGST @ 9% (Tamil Nadu)
+                  </TableCell>
+                  <TableCell align="right" sx={{ py: 0.75, fontSize: 13 }}>
+                    {fmt(sgst)}
+                  </TableCell>
+                </TableRow>
+              </>
+            )}
+
+            {rows.length === 0 && preGstSubtotal === 0 && (
               <TableRow>
                 <TableCell colSpan={2} align="center" sx={{ py: 2, color: "text.secondary" }}>
                   Select add-ons to see pricing
@@ -132,10 +172,10 @@ export default function PriceBreakdown({ breakdown, venue, durationHours, foodSu
         }}
       >
         <Typography variant="subtitle1" fontWeight={700}>
-          Total
+          Total (incl. 18% GST)
         </Typography>
         <Typography variant="h6" fontWeight={800} color="primary">
-          {fmt((breakdown.total ?? 0) + (foodSubtotal ?? 0))}
+          {fmt(grandTotal)}
         </Typography>
       </Box>
     </Paper>

@@ -31,6 +31,7 @@ def create_order(
     currency: str,
     receipt: str,
     notes: dict | None = None,
+    min_partial_amount_inr: float | None = None,
 ) -> dict:
     """Create a Razorpay order. Returns the full order object from the API."""
     amount_paise = int(round(amount_inr * 100))
@@ -42,6 +43,8 @@ def create_order(
         "partial_payment": True,
         "notes": notes or {},
     }
+    if min_partial_amount_inr is not None:
+        payload["first_payment_min_amount"] = int(round(min_partial_amount_inr * 100))
     with httpx.Client(timeout=15) as client:
         resp = client.post(f"{_BASE_URL}/orders", json=payload, auth=_auth())
         resp.raise_for_status()
@@ -130,6 +133,7 @@ def create_invoice(
     description: str,
     line_items: list[dict],
     currency: str = "INR",
+    notes: dict | None = None,
 ) -> dict:
     """
     Create a Razorpay Invoice (type=invoice).
@@ -156,6 +160,8 @@ def create_invoice(
         "sms_notify": 0,
         "email_notify": 0,
     }
+    if notes:
+        payload["notes"] = notes
     with httpx.Client(timeout=15) as client:
         resp = client.post(f"{_BASE_URL}/invoices", json=payload, auth=_auth())
         resp.raise_for_status()

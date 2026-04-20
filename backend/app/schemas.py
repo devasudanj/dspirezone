@@ -205,6 +205,11 @@ class PriceBreakdown(BaseModel):
     extra_rooms_subtotal: float
     favors_subtotal: float
     total: float
+    # GST: Tamil Nadu (CGST 9% + SGST 9% = 18%)
+    cgst: float = 0.0
+    sgst: float = 0.0
+    gst_amount: float = 0.0
+    total_with_gst: float = 0.0
     duration_hours: float
     buffer_minutes: int
 
@@ -326,6 +331,8 @@ class RazorpayOrderCreate(BaseModel):
     confirmation_code: Optional[str] = None
     # If omitted the remaining outstanding balance on the booking is charged.
     amount: Optional[float] = None
+    # Minimum amount for first partial payment (enables Razorpay's native partial UI).
+    min_partial_amount: Optional[float] = None
 
 
 class RazorpayOrderOut(BaseModel):

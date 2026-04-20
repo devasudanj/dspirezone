@@ -113,6 +113,9 @@ def create_order(
 
     # --- Create Razorpay order ---
     receipt = f"dz-{booking.confirmation_code}"
+    min_partial = payload.min_partial_amount
+    if min_partial is not None and min_partial < 1.0:
+        min_partial = 1.0
     try:
         order = rzp.create_order(
             amount_inr=amount_inr,
@@ -123,6 +126,7 @@ def create_order(
                 "confirmation_code": booking.confirmation_code,
                 "contact_email": booking.contact_email or "",
             },
+            min_partial_amount_inr=min_partial,
         )
     except httpx.HTTPStatusError as exc:
         logger.error("Razorpay create_order HTTP error: %s – %s", exc.response.status_code, exc.response.text)
@@ -210,7 +214,21 @@ def verify_payment(
             message="Payment already recorded",
         )
 
+    # Fetch the actual captured amount from Razorpay so partial payments are
+    # recorded correctly (the pending Payment was created with the full order
+    # amount; the user may have paid only the minimum partial amount).
+    actual_amount = payment.amount  # fallback
+    try:
+        rzp_payment = rzp.fetch_payment(payload.razorpay_payment_id)
+        actual_amount = rzp_payment.get("amount", 0) / 100  # paise → INR
+    except Exception as exc:
+        logger.warning(
+            "Could not fetch payment amount from Razorpay (%s) – using order amount %.2f",
+            exc, payment.amount,
+        )
+
     payment.status = PaymentStatus.completed
+    payment.amount = actual_amount
     # Store the Razorpay payment_id as the canonical reference going forward
     payment.payment_ref = payload.razorpay_payment_id
     payment.notes = (
@@ -221,14 +239,14 @@ def verify_payment(
 
     logger.info(
         "Payment verified: %s  booking=%s  amount=%.2f",
-        payload.razorpay_payment_id, payment.booking_id, payment.amount,
+        payload.razorpay_payment_id, payment.booking_id, actual_amount,
     )
 
     return PaymentVerifyOut(
         success=True,
         payment_id=payment.id,
         booking_id=payment.booking_id,
-        amount=payment.amount,
+        amount=actual_amount,
         message="Payment successful",
     )
 
@@ -295,21 +313,95 @@ def generate_invoice(
 
     # --- Build line_items from booking ---
     customer_name = (booking.contact_name or "Guest").strip() or "Guest"
-    description = f"Booking {booking.confirmation_code} – {customer_name}"
 
     line_items: list[dict] = []
+    duration_hours: float = 0.0  # computed below if times are available
+
+    # 1. Event space – hourly charge (base_hourly_rate × duration_hours)
+    venue = booking.venue
+    if booking.start_time and booking.end_time and venue:
+        start_mins = booking.start_time.hour * 60 + booking.start_time.minute
+        end_mins   = booking.end_time.hour   * 60 + booking.end_time.minute
+        duration_hours = (end_mins - start_mins) / 60.0
+        if duration_hours > 0:
+            hourly_rate = venue.base_hourly_rate or 1500.0
+            venue_total_paise = int(round(hourly_rate * duration_hours * 100))
+            line_items.append({
+                "name": f"Event Space – {duration_hours:g} hr × ₹{hourly_rate:,.0f}/hr",
+                "amount": int(round(hourly_rate * 100)),   # unit price in paise
+                "quantity": int(duration_hours) if duration_hours == int(duration_hours) else duration_hours,
+            })
+
+        # 2. Extra rooms (if any)
+        if (booking.extra_rooms_count or 0) > 0 and venue.extra_room_hourly_rate:
+            extra_rate = venue.extra_room_hourly_rate
+            qty = booking.extra_rooms_count
+            line_items.append({
+                "name": f"Extra Room × {qty} – {duration_hours:g} hr @ ₹{extra_rate:,.0f}/hr each",
+                "amount": int(round(extra_rate * duration_hours * 100)),
+                "quantity": qty,
+            })
+
+        # 3. Food court tables (if any)
+        if (booking.foodcourt_tables_count or 0) > 0 and venue.foodcourt_table_rate:
+            fc_rate = venue.foodcourt_table_rate
+            fc_qty  = booking.foodcourt_tables_count
+            line_items.append({
+                "name": f"Food Court Table × {fc_qty}",
+                "amount": int(round(fc_rate * 100)),
+                "quantity": fc_qty,
+            })
+
+    # 4. Catalog add-ons / favors
     if booking.line_items:
         for li in booking.line_items:
             name = getattr(li, "item_name", None) or f"Item #{getattr(li, 'catalog_item_id', '?')}"
+            price_type = getattr(li, "price_type", None) or "fixed"
             unit_price = getattr(li, "unit_price", None) or 0
-            amount_paise = int(round(unit_price * 100))
-            quantity = int(getattr(li, "quantity", 1) or 1)
+            quantity = getattr(li, "quantity", 1) or 1
+            line_total = getattr(li, "line_total", None)
+
+            # Use pre-computed line_total so hourly items reflect full charge
+            # (unit_price × duration_hours already calculated at booking time).
+            if line_total is not None and line_total > 0:
+                total_to_use = line_total
+            else:
+                total_to_use = unit_price * quantity
+
+            amount_paise = int(round(total_to_use * 100))
+
+            # Annotate hourly items so the invoice label is clear
+            if price_type == "per_hour" and duration_hours > 0:
+                label = f"{name} ({duration_hours:g} hr × ₹{unit_price:,.0f}/hr)"
+            elif price_type == "per_unit" and quantity != 1:
+                label = f"{name} × {int(quantity)}"
+            else:
+                label = name
+
             if amount_paise > 0:
                 line_items.append({
-                    "name": name,
+                    "name": label,
                     "amount": amount_paise,
-                    "quantity": quantity,
+                    "quantity": 1,
                 })
+
+    # GST: Tamil Nadu — CGST 9% + SGST 9% = 18% on top of all service line items
+    if line_items:
+        pre_gst_base = booking.total_price / 1.18
+        cgst_inv = round(pre_gst_base * 0.09, 2)
+        sgst_inv = round(pre_gst_base * 0.09, 2)
+        if cgst_inv > 0:
+            line_items.append({
+                "name": "CGST @ 9% (Tamil Nadu)",
+                "amount": int(round(cgst_inv * 100)),
+                "quantity": 1,
+            })
+        if sgst_inv > 0:
+            line_items.append({
+                "name": "SGST @ 9% (Tamil Nadu)",
+                "amount": int(round(sgst_inv * 100)),
+                "quantity": 1,
+            })
 
     if not line_items:
         # Fallback: single line item for total price
@@ -319,6 +411,27 @@ def generate_invoice(
             "quantity": 1,
         }]
 
+    # Compute total already paid for this booking
+    total_paid = sum(
+        p.amount for p in booking.payments if p.status == PaymentStatus.completed
+    )
+    balance_due = max(0.0, booking.total_price - total_paid)
+
+    # Embed payment summary in description — shows prominently on the hosted invoice
+    description = (
+        f"Booking {booking.confirmation_code} – {customer_name} | "
+        f"Order Total: INR {booking.total_price:,.2f} | "
+        f"Advance Paid: INR {total_paid:,.2f} | "
+        f"Balance Due: INR {balance_due:,.2f}"
+    )
+
+    invoice_notes: dict = {
+        "Order_Total": f"INR {booking.total_price:,.2f}",
+        "Amount_Paid": f"INR {total_paid:,.2f}",
+        "Balance_Due": f"INR {balance_due:,.2f}",
+        "Confirmation": booking.confirmation_code,
+    }
+
     try:
         inv = rzp.create_invoice(
             customer_name=customer_name,
@@ -327,6 +440,7 @@ def generate_invoice(
             description=description,
             line_items=line_items,
             currency=settings.RAZORPAY_CURRENCY,
+            notes=invoice_notes,
         )
     except httpx.HTTPStatusError as exc:
         logger.error("Razorpay create_invoice HTTP error: %s – %s", exc.response.status_code, exc.response.text)

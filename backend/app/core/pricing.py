@@ -84,6 +84,12 @@ def calculate_booking_breakdown(
 
     total = venue_subtotal + addons_subtotal + foodcourt_subtotal + extra_rooms_subtotal + favors_subtotal
 
+    # GST: Tamil Nadu intra-state — CGST 9% + SGST 9% = 18%
+    cgst = round(total * 0.09, 2)
+    sgst = round(total * 0.09, 2)
+    gst_amount = round(cgst + sgst, 2)
+    total_with_gst = round(total + gst_amount, 2)
+
     return {
         "venue_subtotal": round(venue_subtotal, 2),
         "addons_subtotal": round(addons_subtotal, 2),
@@ -91,6 +97,10 @@ def calculate_booking_breakdown(
         "extra_rooms_subtotal": round(extra_rooms_subtotal, 2),
         "favors_subtotal": round(favors_subtotal, 2),
         "total": round(total, 2),
+        "cgst": cgst,
+        "sgst": sgst,
+        "gst_amount": gst_amount,
+        "total_with_gst": total_with_gst,
         "duration_hours": duration_hours,
         "buffer_minutes": venue.buffer_minutes,
     }

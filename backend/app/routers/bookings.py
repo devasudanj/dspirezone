@@ -252,7 +252,7 @@ def create_booking(
         start_time=payload.start_time,
         end_time=end_time,
         status=BookingStatus.confirmed,
-        total_price=breakdown["total"],
+        total_price=breakdown["total_with_gst"],
         confirmation_code=code,
         contact_name=payload.guest_name or booking_user.name,
         contact_email=(payload.guest_email.lower() if payload.guest_email else booking_user.email),
@@ -531,7 +531,7 @@ def update_booking(
     if new_foodcourt_tables != booking.foodcourt_tables_count:
         changes.append(f"Food court tables: {booking.foodcourt_tables_count} → {new_foodcourt_tables}")
     old_total = booking.total_price
-    new_total = breakdown["total"]
+    new_total = breakdown["total_with_gst"]
     if abs(old_total - new_total) > 0.01:
         changes.append(f"Total price: ₹{old_total:,.0f} → ₹{new_total:,.0f}")
     if payload.line_items is not None:

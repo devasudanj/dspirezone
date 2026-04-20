@@ -70,6 +70,10 @@ export interface PriceBreakdown {
   extra_rooms_subtotal: number;
   favors_subtotal: number;
   total: number;
+  cgst?: number;
+  sgst?: number;
+  gst_amount?: number;
+  total_with_gst?: number;
   duration_hours: number;
   buffer_minutes: number;
 }

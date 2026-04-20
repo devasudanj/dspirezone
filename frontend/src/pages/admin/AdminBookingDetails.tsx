@@ -439,6 +439,26 @@ export default function AdminBookingDetails() {
             <Paper sx={{ p: 3, borderRadius: 3 }}>
               <Typography variant="h6" fontWeight={700} gutterBottom>Invoice</Typography>
               <Divider sx={{ mb: 2 }} />
+
+              {/* Payment Summary */}
+              <Stack direction="row" spacing={3} sx={{ mb: 2, flexWrap: "wrap", gap: 1 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Invoice Total</Typography>
+                  <Typography fontWeight={700}>₹{Number(booking.total_price).toLocaleString("en-IN")}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Amount Paid</Typography>
+                  <Typography fontWeight={700} color="success.main">₹{Number(booking.total_paid).toLocaleString("en-IN")}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Balance Due</Typography>
+                  <Typography fontWeight={700} color={booking.remaining_due > 0 ? "warning.dark" : "success.main"}>
+                    ₹{Number(booking.remaining_due).toLocaleString("en-IN")}
+                  </Typography>
+                </Box>
+              </Stack>
+              <Divider sx={{ mb: 2 }} />
+
               {invoiceData ? (
                 <Stack spacing={1.5}>
                   <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">

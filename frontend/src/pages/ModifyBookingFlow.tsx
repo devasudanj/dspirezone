@@ -288,7 +288,12 @@ export default function ModifyBookingFlow() {
     return sum + (m.step > 1 ? (qty / m.step) * m.price : m.price * qty);
   }, 0);
 
-  const newTotal = (priceBreakdown?.total ?? booking?.total_price ?? 0) + foodSubtotal;
+  // GST: Tamil Nadu — CGST 9% + SGST 9% = 18%
+  // When a fresh priceBreakdown is available apply GST to (venue + food).
+  // When not (no changes made), booking.total_price already includes GST for new bookings.
+  const newTotal = priceBreakdown
+    ? Math.round((priceBreakdown.total + foodSubtotal) * 1.18 * 100) / 100
+    : (booking?.total_price ?? 0) + Math.round(foodSubtotal * 1.18 * 100) / 100;
   const totalPaid = booking?.total_paid ?? 0;
   const remainingDue = Math.max(0, newTotal - totalPaid);
   const isOverpaid = totalPaid > newTotal;
@@ -889,6 +894,26 @@ export default function ModifyBookingFlow() {
           <Paper sx={{ mt: 3, p: 3, borderRadius: 3 }}>
             <Typography variant="h6" fontWeight={700} gutterBottom>Invoice</Typography>
             <Divider sx={{ mb: 2 }} />
+
+            {/* Payment Summary */}
+            <Stack direction="row" spacing={3} sx={{ mb: 2, flexWrap: "wrap", gap: 1 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Invoice Total</Typography>
+                <Typography fontWeight={700}>₹{newTotal.toLocaleString("en-IN")}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Amount Paid</Typography>
+                <Typography fontWeight={700} color="success.main">₹{totalPaid.toLocaleString("en-IN")}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Balance Due</Typography>
+                <Typography fontWeight={700} color={remainingDue > 0 ? "warning.dark" : "success.main"}>
+                  ₹{remainingDue.toLocaleString("en-IN")}
+                </Typography>
+              </Box>
+            </Stack>
+            <Divider sx={{ mb: 2 }} />
+
             {invoiceData ? (
               <Stack spacing={1.5}>
                 <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
