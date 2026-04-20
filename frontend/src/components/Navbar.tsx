@@ -40,11 +40,13 @@ import { BRAND } from "../theme";
 
 const NAV_LINKS = [
   { label: "Home", href: "/" },
-  { label: "Book Now", href: "/book" },
-  { label: "Vendors", href: "/vendors" },
+  { label: "Book Now", href: "/book", highlight: true },
+  { label: "VR Zone", href: "/dspire-vr-zone" },
+  { label: "Food Court Vendors", href: "/vendors" },
   { label: "Packages", href: "/packages" },
   { label: "Gallery", href: "/gallery" },
   { label: "Contact", href: "/contact" },
+  { label: "Hiring", href: "/hiring" },
 ];
 
 function HideOnScroll({ children }: { children: React.ReactElement }) {
@@ -101,15 +103,33 @@ export default function Navbar() {
                       key={link.href}
                       component={RouterLink}
                       to={link.href}
-                      sx={{
-                        color:
-                          location.pathname === link.href
-                            ? BRAND.purple
-                            : BRAND.charcoal,
-                        fontWeight: location.pathname === link.href ? 700 : 500,
-                        px: 1.5,
-                        "&:hover": { background: "rgba(74,14,143,0.06)" },
-                      }}
+                      sx={
+                        link.highlight
+                          ? {
+                              background: "linear-gradient(135deg, #4A0E8F 0%, #BF00FF 100%)",
+                              color: "white",
+                              fontWeight: 700,
+                              px: 1.5,
+                              borderRadius: 2,
+                              border: "1px solid rgba(191,0,255,0.4)",
+                              boxShadow: location.pathname === link.href
+                                ? "0 0 12px rgba(191,0,255,0.6)"
+                                : "0 0 6px rgba(191,0,255,0.25)",
+                              "&:hover": {
+                                background: "linear-gradient(135deg, #6A1EAF 0%, #D420FF 100%)",
+                                boxShadow: "0 0 18px rgba(191,0,255,0.5)",
+                              },
+                            }
+                          : {
+                              color:
+                                location.pathname === link.href
+                                  ? BRAND.purple
+                                  : BRAND.charcoal,
+                              fontWeight: location.pathname === link.href ? 700 : 500,
+                              px: 1.5,
+                              "&:hover": { background: "rgba(74,14,143,0.06)" },
+                            }
+                      }
                     >
                       {link.label}
                     </Button>

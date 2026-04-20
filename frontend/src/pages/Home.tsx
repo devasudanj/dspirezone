@@ -314,6 +314,126 @@ export default function Home() {
       </Box>
 
       {/* ============================================================
+          DSPIRE VR ZONE TEASER BANNER
+      ============================================================ */}
+      <Box sx={{ py: { xs: 6, md: 8 }, px: 2 }}>
+        <Container maxWidth="lg">
+          <MotionBox
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.7 }}
+          >
+            <Box
+              component={RouterLink}
+              to="/dspire-vr-zone"
+              sx={{
+                display: "block",
+                textDecoration: "none",
+                borderRadius: 4,
+                overflow: "hidden",
+                position: "relative",
+                background: "linear-gradient(135deg, #05001A 0%, #0D0035 50%, #1A0050 100%)",
+                border: "1px solid rgba(0,245,255,0.2)",
+                boxShadow: "0 0 40px rgba(191,0,255,0.15), 0 0 80px rgba(0,245,255,0.08)",
+                transition: "all 0.4s ease",
+                "&:hover": {
+                  transform: "translateY(-4px)",
+                  boxShadow: "0 8px 60px rgba(191,0,255,0.3), 0 0 80px rgba(0,245,255,0.15)",
+                  border: "1px solid rgba(0,245,255,0.5)",
+                },
+              }}
+            >
+              {/* Grid overlay */}
+              <Box
+                sx={{
+                  position: "absolute",
+                  inset: 0,
+                  backgroundImage:
+                    "linear-gradient(rgba(0,245,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(0,245,255,0.04) 1px, transparent 1px)",
+                  backgroundSize: "40px 40px",
+                  pointerEvents: "none",
+                }}
+              />
+              {/* Glow orbs */}
+              <Box sx={{ position: "absolute", width: 300, height: 300, borderRadius: "50%", background: "radial-gradient(circle, #BF00FF 0%, transparent 70%)", opacity: 0.12, top: "-80px", right: "-60px", pointerEvents: "none" }} />
+              <Box sx={{ position: "absolute", width: 250, height: 250, borderRadius: "50%", background: "radial-gradient(circle, #00F5FF 0%, transparent 70%)", opacity: 0.1, bottom: "-60px", left: "20%", pointerEvents: "none" }} />
+
+              <Box sx={{ position: "relative", zIndex: 1, p: { xs: 4, md: 6 }, display: "flex", flexDirection: { xs: "column", md: "row" }, alignItems: "center", gap: 4 }}>
+                {/* Icon */}
+                <Box
+                  sx={{
+                    flexShrink: 0,
+                    width: { xs: 80, md: 110 },
+                    height: { xs: 80, md: 110 },
+                    borderRadius: "50%",
+                    border: "2px solid rgba(0,245,255,0.4)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: "0 0 30px rgba(0,245,255,0.3)",
+                  }}
+                >
+                  <Box sx={{ fontSize: { xs: "2.5rem", md: "3.5rem" } }}>🥽</Box>
+                </Box>
+
+                {/* Text */}
+                <Box sx={{ flex: 1 }}>
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5, flexWrap: "wrap", gap: 1 }}>
+                    <Chip
+                      label="COMING SOON"
+                      size="small"
+                      sx={{ bgcolor: "#FF006E", color: "white", fontWeight: 800, fontSize: "0.7rem", letterSpacing: 1.5, boxShadow: "0 0 10px rgba(255,0,110,0.5)" }}
+                    />
+                    <Chip
+                      label="🎮 Free-Roam VR Arena"
+                      size="small"
+                      sx={{ bgcolor: "rgba(0,245,255,0.12)", color: "#00F5FF", fontWeight: 700, border: "1px solid rgba(0,245,255,0.3)" }}
+                    />
+                  </Stack>
+                  <Typography
+                    sx={{
+                      fontWeight: 900,
+                      fontSize: { xs: "1.8rem", md: "2.4rem" },
+                      lineHeight: 1.1,
+                      mb: 1,
+                      background: "linear-gradient(90deg, #00F5FF 0%, #BF00FF 60%, #FF006E 100%)",
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      backgroundClip: "text",
+                    }}
+                  >
+                    DspireVR Zone
+                  </Typography>
+                  <Typography sx={{ color: "rgba(255,255,255,0.65)", fontSize: { xs: "0.9rem", md: "1rem" }, lineHeight: 1.6, maxWidth: 520 }}>
+                    Step into the future of immersive entertainment — a high-energy VR arena for friends, families, and gamers of all ages. <strong style={{ color: "rgba(255,255,255,0.85)" }}>Launching soon at DspireZone.</strong>
+                  </Typography>
+                </Box>
+
+                {/* CTA Arrow */}
+                <Box
+                  sx={{
+                    flexShrink: 0,
+                    px: 3,
+                    py: 1.5,
+                    borderRadius: 3,
+                    border: "1px solid rgba(0,245,255,0.35)",
+                    color: "#00F5FF",
+                    fontWeight: 700,
+                    fontSize: "0.95rem",
+                    whiteSpace: "nowrap",
+                    display: { xs: "none", sm: "block" },
+                  }}
+                >
+                  Explore →
+                </Box>
+              </Box>
+            </Box>
+          </MotionBox>
+        </Container>
+      </Box>
+
+      {/* ============================================================
           PACKAGES / ADD-ONS TEASER
       ============================================================ */}
       <Box

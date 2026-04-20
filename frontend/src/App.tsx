@@ -23,6 +23,8 @@ const AdminBookings = lazy(() => import("./pages/admin/AdminBookings"));
 const AdminBookingDetails = lazy(() => import("./pages/admin/AdminBookingDetails"));
 const AdminCatalog = lazy(() => import("./pages/admin/AdminCatalog"));
 const AdminVenue = lazy(() => import("./pages/admin/AdminVenue"));
+const DspireVRZone = lazy(() => import("./pages/DspireVRZone"));
+const Hiring = lazy(() => import("./pages/Hiring"));
 
 const Loader = () => (
   <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "60vh" }}>
@@ -46,6 +48,8 @@ export default function App() {
               <Route path="/vendors" element={<Vendors />} />
               <Route path="/vendor-guidelines" element={<VendorGuidelines />} />
               <Route path="/policies" element={<Policies />} />
+              <Route path="/dspire-vr-zone" element={<DspireVRZone />} />
+              <Route path="/hiring" element={<Hiring />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
 

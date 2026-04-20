@@ -229,6 +229,7 @@ function IncludedItemsStep({ venue }: { venue: Venue | null }) {
     { icon: "❄️", label: "Air Conditioning", sub: "Climate-controlled hall" },
     { icon: "🚗", label: "Free Self Street Parking", sub: "Self parking is available at site" },
     { icon: "🧹", label: "Post-event Cleanup", sub: "Full cleanup after your event" },
+    { icon: "🥽", label: "10 Min DspireVR Zone Experience", sub: "Complimentary for 1 guest — additional guests can sign up at the event space", highlight: true },
   ];
 
   return (
