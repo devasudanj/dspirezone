@@ -225,3 +225,16 @@ class BookingAuditLog(Base):
     change_summary = Column(Text)
 
     booking = relationship("Booking", back_populates="audit_logs")
+
+
+class DiscountCode(Base):
+    __tablename__ = "discount_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(50), unique=True, nullable=False, index=True)
+    description = Column(String(255), nullable=True)
+    discount_pct = Column(Float, nullable=False)       # e.g. 10.0 = 10 %
+    active = Column(Boolean, default=True, nullable=False)
+    valid_from = Column(Date, nullable=True)
+    valid_until = Column(Date, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

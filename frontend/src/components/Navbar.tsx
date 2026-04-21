@@ -220,6 +220,15 @@ export default function Navbar() {
                             <Dashboard sx={{ mr: 1, fontSize: 18 }} /> Admin Portal
                           </MenuItem>
                         )}
+                        {isAdmin && (
+                          <MenuItem
+                            component={RouterLink}
+                            to="/admin/discounts"
+                            onClick={() => setAnchorEl(null)}
+                          >
+                            <Dashboard sx={{ mr: 1, fontSize: 18 }} /> Discount Codes
+                          </MenuItem>
+                        )}
                         <Divider />
                         <MenuItem onClick={handleLogout} sx={{ color: "error.main" }}>
                           <Logout sx={{ mr: 1, fontSize: 18 }} /> Logout

@@ -6,6 +6,7 @@ import {
 } from "@mui/material";
 import {
   ConfirmationNumber, People, EventAvailable, AttachMoney,
+  CalendarMonth, ViewList, Store, LocalOffer,
 } from "@mui/icons-material";
 import { Link as RouterLink } from "react-router-dom";
 import api from "../../api/client";
@@ -57,6 +58,35 @@ export default function AdminDashboard() {
       <Container maxWidth="xl">
         <Typography variant="h4" fontWeight={800} gutterBottom>Admin Dashboard</Typography>
         <Typography color="text.secondary" sx={{ mb: 4 }}>Overview of DspireZone bookings and revenue.</Typography>
+
+        {/* Quick Navigation */}
+        <Grid container spacing={2} sx={{ mb: 5 }}>
+          {[
+            { label: "Bookings", href: "/admin/bookings", icon: <CalendarMonth />, color: BRAND.purple },
+            { label: "Catalog", href: "/admin/catalog", icon: <ViewList />, color: "#0891B2" },
+            { label: "Venue", href: "/admin/venue", icon: <Store />, color: "#16A34A" },
+            { label: "Discount Codes", href: "/admin/discounts", icon: <LocalOffer />, color: BRAND.gold },
+          ].map((nav) => (
+            <Grid item xs={6} sm={3} key={nav.href}>
+              <Card
+                component={RouterLink}
+                to={nav.href}
+                sx={{
+                  display: "flex", alignItems: "center", gap: 1.5, p: 2,
+                  textDecoration: "none", color: "text.primary",
+                  border: `1px solid ${nav.color}33`,
+                  "&:hover": { bgcolor: `${nav.color}10`, borderColor: nav.color },
+                  transition: "all 0.2s",
+                }}
+              >
+                <Avatar sx={{ bgcolor: `${nav.color}22`, color: nav.color, width: 36, height: 36 }}>
+                  {nav.icon}
+                </Avatar>
+                <Typography fontWeight={700} variant="body2">{nav.label}</Typography>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
 
         {/* Stats */}
         <Grid container spacing={3} sx={{ mb: 5 }}>

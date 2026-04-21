@@ -394,3 +394,48 @@ class VendorInquiryOut(BaseModel):
     created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Discount Codes
+# ---------------------------------------------------------------------------
+
+class DiscountCodeCreate(BaseModel):
+    code: str
+    description: Optional[str] = None
+    discount_pct: float
+    active: bool = True
+    valid_from: Optional[date] = None
+    valid_until: Optional[date] = None
+
+
+class DiscountCodeUpdate(BaseModel):
+    description: Optional[str] = None
+    discount_pct: Optional[float] = None
+    active: Optional[bool] = None
+    valid_from: Optional[date] = None
+    valid_until: Optional[date] = None
+
+
+class DiscountCodeOut(BaseModel):
+    id: int
+    code: str
+    description: Optional[str] = None
+    discount_pct: float
+    active: bool
+    valid_from: Optional[date] = None
+    valid_until: Optional[date] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class DiscountValidateRequest(BaseModel):
+    code: str
+    booking_date: Optional[date] = None
+
+
+class DiscountValidateResponse(BaseModel):
+    valid: bool
+    discount_pct: float
+    message: str

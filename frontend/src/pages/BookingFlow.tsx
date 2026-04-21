@@ -781,6 +781,7 @@ function PaymentStep({
   createdBooking,
   onSubmit,
   foodSubtotal,
+  onDiscountApplied,
 }: {
   state: BookingState;
   priceBreakdown: PriceBreakdownType | null;
@@ -791,8 +792,80 @@ function PaymentStep({
   createdBooking: Booking | null;
   onSubmit: () => void;
   foodSubtotal: number;
+  onDiscountApplied: (code: string, pct: number) => void;
 }) {
-  const preGstSubtotal = (priceBreakdown?.total ?? 0) + foodSubtotal;
+  const [codeInput, setCodeInput] = useState("");
+  const [appliedCode, setAppliedCode] = useState("");
+  const [appliedPct, setAppliedPct] = useState(0);
+  const [discountMsg, setDiscountMsg] = useState("");
+  const [discountStatus, setDiscountStatus] = useState<"" | "success" | "error" | "info">("");
+  const [applyingDiscount, setApplyingDiscount] = useState(false);
+  const [isAutoApplied, setIsAutoApplied] = useState(false);
+  const [changingCode, setChangingCode] = useState(false);
+
+  const applyCode = useCallback(async (code: string, isAuto = false) => {
+    if (!code) return;
+    setApplyingDiscount(true);
+    try {
+      const res = await api.post<{ valid: boolean; discount_pct: number; message: string }>("/discounts/validate", {
+        code: code.toUpperCase(),
+        booking_date: state.date?.format("YYYY-MM-DD"),
+      });
+      if (res.data.valid) {
+        setAppliedCode(code.toUpperCase());
+        setAppliedPct(res.data.discount_pct);
+        onDiscountApplied(code.toUpperCase(), res.data.discount_pct);
+        setIsAutoApplied(isAuto);
+        setChangingCode(false);
+        setDiscountStatus(isAuto ? "info" : "success");
+        setDiscountMsg(
+          isAuto
+            ? `Off-hours discount auto-applied: ${res.data.discount_pct}% off venue cost`
+            : (res.data.message || `${res.data.discount_pct}% off venue cost applied!`),
+        );
+      } else {
+        setDiscountStatus("error");
+        setDiscountMsg(res.data.message || "Invalid or expired discount code.");
+      }
+    } catch {
+      setDiscountStatus("error");
+      setDiscountMsg("Could not validate discount code. Please try again.");
+    } finally {
+      setApplyingDiscount(false);
+    }
+  }, [state.date, onDiscountApplied]);
+
+  // Auto-detect off-hours (10 AM – 3 PM) and pre-apply DZ-SPECIAL25
+  useEffect(() => {
+    if (!state.startTime) return;
+    const hour = state.startTime.hour();
+    if (hour >= 10 && hour < 15) {
+      void applyCode("DZ-SPECIAL25", true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.startTime]);
+
+  const removeDiscount = () => {
+    setAppliedCode("");
+    setAppliedPct(0);
+    setDiscountMsg("");
+    setDiscountStatus("");
+    setCodeInput("");
+    setIsAutoApplied(false);
+    setChangingCode(false);
+    onDiscountApplied("", 0);
+  };
+
+  const venueSubtotal = priceBreakdown?.venue_subtotal ?? 0;
+  const discountSavings = appliedPct > 0 ? Math.round(venueSubtotal * (appliedPct / 100) * 100) / 100 : 0;
+  const discountedVenueSubtotal = venueSubtotal - discountSavings;
+  const nonVenueSubtotal =
+    (priceBreakdown?.addons_subtotal ?? 0) +
+    (priceBreakdown?.foodcourt_subtotal ?? 0) +
+    (priceBreakdown?.extra_rooms_subtotal ?? 0) +
+    (priceBreakdown?.favors_subtotal ?? 0) +
+    foodSubtotal;
+  const preGstSubtotal = discountedVenueSubtotal + nonVenueSubtotal;
   const gstAmount = Math.round(preGstSubtotal * 0.18 * 100) / 100;
   const total = Math.round((preGstSubtotal + gstAmount) * 100) / 100;
   const reservationAdvance = total * 0.1;
@@ -825,7 +898,7 @@ function PaymentStep({
             </Box>
           </Alert>
         )}
-        <Stack spacing={1.2}>
+        <Stack spacing={1.2} sx={{ mb: 2 }}>
           <Typography><strong>Event Date:</strong> {state.date?.format("DD MMM YYYY")}</Typography>
           <Typography><strong>Time Window:</strong> {state.startTime?.format("hh:mm A")} - {state.startTime?.add(state.durationHours, "hour").format("hh:mm A")} IST</Typography>
           <Typography><strong>Duration:</strong> {state.durationHours} hours</Typography>
@@ -833,12 +906,107 @@ function PaymentStep({
           <Typography><strong>Email:</strong> {user ? user.email : guestDetails.email}</Typography>
           {!user && <Typography><strong>Phone:</strong> {guestDetails.phone}</Typography>}
         </Stack>
+
+        {/* Discount Code */}
+        {!appliedCode || changingCode ? (
+          <Box>
+            <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+              Discount Code
+            </Typography>
+            {changingCode && (
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                Enter a different code to replace <strong>{appliedCode}</strong>, or{" "}
+                <Box
+                  component="span"
+                  sx={{ color: "primary.main", cursor: "pointer", textDecoration: "underline" }}
+                  onClick={() => { setChangingCode(false); setCodeInput(""); setDiscountMsg(""); }}
+                >
+                  keep current
+                </Box>
+                .
+              </Typography>
+            )}
+            <Stack direction="row" spacing={1} alignItems="center">
+              <TextField
+                size="small"
+                placeholder="e.g. DZ-APR25"
+                value={codeInput}
+                onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+                inputProps={{ maxLength: 20 }}
+                sx={{ flex: 1 }}
+                onKeyDown={(e) => { if (e.key === "Enter") void applyCode(codeInput); }}
+                autoFocus={changingCode}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => void applyCode(codeInput)}
+                disabled={applyingDiscount || !codeInput}
+                sx={{ fontWeight: 700, whiteSpace: "nowrap" }}
+              >
+                {applyingDiscount ? <CircularProgress size={16} /> : "Apply"}
+              </Button>
+            </Stack>
+          </Box>
+        ) : (
+          <Box>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" gap={1}>
+              <Chip
+                label={`${appliedCode} — ${appliedPct}% off venue`}
+                color="success"
+                onDelete={removeDiscount}
+                sx={{ fontWeight: 700 }}
+              />
+              <Button
+                size="small"
+                variant="text"
+                sx={{ fontWeight: 600, color: "text.secondary", fontSize: "0.75rem" }}
+                onClick={() => { setChangingCode(true); setCodeInput(""); setDiscountMsg(""); setDiscountStatus(""); }}
+              >
+                Change Code
+              </Button>
+            </Stack>
+          </Box>
+        )}
+        {discountMsg && (
+          <Alert
+            severity={discountStatus === "error" ? "error" : discountStatus === "info" ? "info" : "success"}
+            sx={{ mt: 1 }}
+            onClose={() => setDiscountMsg("")}
+          >
+            {discountMsg}
+          </Alert>
+        )}
       </Grid>
+
       <Grid item xs={12} md={5}>
         <Paper sx={{ p: 3, borderRadius: 2 }}>
           <Typography variant="subtitle1" fontWeight={700} gutterBottom>
             Payment Summary
           </Typography>
+          {appliedPct > 0 && (
+            <>
+              <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                <Typography color="text.secondary" variant="body2">Venue Cost (original)</Typography>
+                <Typography variant="body2" sx={{ textDecoration: "line-through", color: "text.disabled" }}>
+                  ₹{venueSubtotal.toLocaleString("en-IN")}
+                </Typography>
+              </Box>
+              <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                <Typography color="text.secondary" variant="body2">Venue Cost (after {appliedPct}% off)</Typography>
+                <Typography variant="body2" color="success.main" fontWeight={700}>
+                  ₹{discountedVenueSubtotal.toLocaleString("en-IN")}
+                </Typography>
+              </Box>
+              <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}>
+                <Typography variant="body2" color="success.main">You save</Typography>
+                <Typography variant="body2" color="success.main" fontWeight={700}>
+                  −₹{discountSavings.toLocaleString("en-IN")}
+                </Typography>
+              </Box>
+              <Divider sx={{ mb: 1 }} />
+            </>
+          )}
           <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}>
             <Typography color="text.secondary">Order Total</Typography>
             <Typography fontWeight={700}>₹{total.toLocaleString("en-IN")}</Typography>
@@ -884,6 +1052,8 @@ export default function BookingFlow() {
   const [createdBooking, setCreatedBooking] = useState<Booking | null>(null);
   // Holds a booking that was created but whose payment was abandoned — reused on retry
   const [draftBooking, setDraftBooking] = useState<Booking | null>(null);
+  const [appliedDiscountCode, setAppliedDiscountCode] = useState("");
+  const [appliedDiscountPct, setAppliedDiscountPct] = useState(0);
 
   const [bookingState, setBookingState] = useState<BookingState>({
     date: null,
@@ -994,7 +1164,15 @@ export default function BookingFlow() {
     setSubmitError("");
 
     // Full order total with 18% GST (CGST 9% + SGST 9%, Tamil Nadu) — Razorpay shows Pay Full / Pay Minimum natively
-    const preGstSubtotal = (priceBreakdown?.total ?? 0) + foodSubtotal;
+    const venueSubtotal = priceBreakdown?.venue_subtotal ?? 0;
+    const discountSavings = appliedDiscountPct > 0 ? Math.round(venueSubtotal * (appliedDiscountPct / 100) * 100) / 100 : 0;
+    const nonVenueSubtotal =
+      (priceBreakdown?.addons_subtotal ?? 0) +
+      (priceBreakdown?.foodcourt_subtotal ?? 0) +
+      (priceBreakdown?.extra_rooms_subtotal ?? 0) +
+      (priceBreakdown?.favors_subtotal ?? 0) +
+      foodSubtotal;
+    const preGstSubtotal = (venueSubtotal - discountSavings) + nonVenueSubtotal;
     const gstAmt = Math.round(preGstSubtotal * 0.18 * 100) / 100;
     const total = Math.round((preGstSubtotal + gstAmt) * 100) / 100;
     const advance = Math.max(1, Math.round(total * 0.1 * 100) / 100);
@@ -1028,6 +1206,8 @@ export default function BookingFlow() {
             .filter(Boolean)
             .join(", ") || undefined,
           line_items: buildLineItems(),
+          discount_code: appliedDiscountCode || undefined,
+          discount_pct: appliedDiscountPct > 0 ? appliedDiscountPct : undefined,
         });
         booking = response.data;
         setDraftBooking(booking);
@@ -1104,7 +1284,7 @@ export default function BookingFlow() {
       setSubmitError(err instanceof Error ? err.message : "Unable to initiate payment");
       setSubmittingBooking(false);
     }
-  }, [venue, bookingState, user, guestDetails, buildLineItems, loadAvailableSlots, draftBooking, priceBreakdown, foodSubtotal]);
+  }, [venue, bookingState, user, guestDetails, buildLineItems, loadAvailableSlots, draftBooking, priceBreakdown, foodSubtotal, appliedDiscountCode, appliedDiscountPct]);
 
   const canProceed = useCallback((): boolean => {
     if (activeStep === 0) return !!(bookingState.date && bookingState.startTime);
@@ -1178,6 +1358,10 @@ export default function BookingFlow() {
             createdBooking={createdBooking}
             onSubmit={handleBookingSubmit}
             foodSubtotal={foodSubtotal}
+            onDiscountApplied={(code, pct) => {
+              setAppliedDiscountCode(code);
+              setAppliedDiscountPct(pct);
+            }}
           />
         );
       default:
