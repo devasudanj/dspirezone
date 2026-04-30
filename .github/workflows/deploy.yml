@@ -1,10 +1,8 @@
 name: Build & Deploy DspireZone to Azure Web App
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+    # Push trigger removed — use manual dispatch or az webapp deploy CLI to deploy
 
 env:
   AZURE_WEBAPP_NAME: dspirezone-app-dev
