@@ -103,6 +103,8 @@ function GamesTab() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editGame, setEditGame] = useState<VRGame | null>(null);
   const [form, setForm] = useState<VRGamePayload>(emptyGameForm());
+  // Multi-select categories kept separately; category sent to API = selectedCategories[0]
+  const [selectedCategories, setSelectedCategories] = useState<VRGameCategory[]>([]);
   const [saving, setSaving] = useState(false);
   const [filterCategory, setFilterCategory] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
@@ -135,6 +137,7 @@ function GamesTab() {
 
   const openCreate = () => {
     setEditGame(null);
+    setSelectedCategories([]);
     setForm(emptyGameForm());
     setError(null);
     setDialogOpen(true);
@@ -142,15 +145,21 @@ function GamesTab() {
 
   const openEdit = (g: VRGame) => {
     setEditGame(g);
+    // Pre-populate categories from existing single value (API returns one string)
+    setSelectedCategories(
+      g.category && VR_CATEGORIES.includes(g.category as VRGameCategory)
+        ? [g.category as VRGameCategory]
+        : []
+    );
     setForm({
-      name: g.name,
-      description: g.description,
-      category: g.category,
+      name: g.name ?? "",
+      description: g.description ?? "",
+      category: (g.category as VRGameCategory) ?? "Action",
       thumbnail_url: g.thumbnail_url ?? "",
       youtube_url: g.youtube_url ?? "",
-      viewable_age: g.viewable_age,
-      is_multiplayer: g.is_multiplayer,
-      status: g.status,
+      viewable_age: g.viewable_age ?? 7,
+      is_multiplayer: g.is_multiplayer ?? false,
+      status: (g.status as VRGameStatus) ?? "ACTIVE",
     });
     setError(null);
     setDialogOpen(true);
@@ -161,6 +170,8 @@ function GamesTab() {
     setError(null);
     const payload: VRGamePayload = {
       ...form,
+      // Use first selected category; fall back to form value
+      category: selectedCategories[0] ?? form.category,
       thumbnail_url: form.thumbnail_url || undefined,
       youtube_url: form.youtube_url || undefined,
     };
@@ -446,31 +457,44 @@ function GamesTab() {
               multiline
               minRows={2}
             />
-            <Grid container spacing={2}>
-              <Grid item xs={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Category</InputLabel>
-                  <Select
-                    label="Category"
-                    value={form.category}
-                    onChange={(e) =>
-                      setForm({ ...form, category: e.target.value as VRGameCategory })
-                    }
-                  >
-                    {VR_CATEGORIES.map((c) => (
-                      <MenuItem key={c} value={c}>
-                        {c}
-                      </MenuItem>
+            {/* Category — multi-select with checkboxes */}
+            <FormControl fullWidth>
+              <InputLabel>Categories</InputLabel>
+              <Select
+                label="Categories"
+                multiple
+                value={selectedCategories}
+                onChange={(e) =>
+                  setSelectedCategories(e.target.value as VRGameCategory[])
+                }
+                renderValue={(selected) => (
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                    {(selected as VRGameCategory[]).map((v) => (
+                      <Chip key={v} label={v} size="small" sx={{ bgcolor: `${BRAND.purple}18`, color: BRAND.purple, fontWeight: 600 }} />
                     ))}
-                  </Select>
-                </FormControl>
-              </Grid>
+                  </Box>
+                )}
+              >
+                {VR_CATEGORIES.map((c) => (
+                  <MenuItem key={c} value={c}>
+                    <Checkbox
+                      checked={selectedCategories.includes(c)}
+                      size="small"
+                      sx={{ mr: 0.5, color: BRAND.purple, "&.Mui-checked": { color: BRAND.purple } }}
+                    />
+                    <ListItemText primary={c} />
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <Grid container spacing={2}>
               <Grid item xs={6}>
                 <FormControl fullWidth>
                   <InputLabel>Status</InputLabel>
                   <Select
                     label="Status"
-                    value={form.status}
+                    value={form.status ?? "ACTIVE"}
                     onChange={(e) =>
                       setForm({ ...form, status: e.target.value as VRGameStatus })
                     }
@@ -483,13 +507,11 @@ function GamesTab() {
                   </Select>
                 </FormControl>
               </Grid>
-            </Grid>
-            <Grid container spacing={2}>
               <Grid item xs={6}>
                 <TextField
                   label="Viewable Age (min)"
                   type="number"
-                  value={form.viewable_age}
+                  value={form.viewable_age ?? 7}
                   onChange={(e) =>
                     setForm({ ...form, viewable_age: parseInt(e.target.value, 10) || 0 })
                   }
@@ -497,31 +519,31 @@ function GamesTab() {
                   inputProps={{ min: 0, max: 99 }}
                 />
               </Grid>
-              <Grid item xs={6} sx={{ display: "flex", alignItems: "center" }}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={form.is_multiplayer}
-                      onChange={(e) =>
-                        setForm({ ...form, is_multiplayer: e.target.checked })
-                      }
-                      color="primary"
-                    />
-                  }
-                  label="Multiplayer"
-                />
-              </Grid>
             </Grid>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={form.is_multiplayer ?? false}
+                  onChange={(e) =>
+                    setForm({ ...form, is_multiplayer: e.target.checked })
+                  }
+                  color="primary"
+                />
+              }
+              label="Multiplayer mode"
+            />
+
             <TextField
               label="Thumbnail URL (optional)"
-              value={form.thumbnail_url}
+              value={form.thumbnail_url ?? ""}
               onChange={(e) => setForm({ ...form, thumbnail_url: e.target.value })}
               fullWidth
               placeholder="https://..."
             />
             <TextField
               label="YouTube URL (optional)"
-              value={form.youtube_url}
+              value={form.youtube_url ?? ""}
               onChange={(e) => setForm({ ...form, youtube_url: e.target.value })}
               fullWidth
               placeholder="https://youtu.be/..."
