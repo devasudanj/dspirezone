@@ -24,6 +24,7 @@ const AdminBookingDetails = lazy(() => import("./pages/admin/AdminBookingDetails
 const AdminCatalog = lazy(() => import("./pages/admin/AdminCatalog"));
 const AdminVenue = lazy(() => import("./pages/admin/AdminVenue"));
 const AdminDiscounts = lazy(() => import("./pages/admin/AdminDiscounts"));
+const AdminVRManagement = lazy(() => import("./pages/admin/AdminVRManagement"));
 const DspireVRZone = lazy(() => import("./pages/DspireVRZone"));
 const Hiring = lazy(() => import("./pages/Hiring"));
 
@@ -113,6 +114,14 @@ export default function App() {
                 element={
                   <ProtectedRoute adminOnly>
                     <AdminDiscounts />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/vr-management"
+                element={
+                  <ProtectedRoute adminOnly>
+                    <AdminVRManagement />
                   </ProtectedRoute>
                 }
               />

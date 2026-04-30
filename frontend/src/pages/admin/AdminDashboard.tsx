@@ -6,7 +6,7 @@ import {
 } from "@mui/material";
 import {
   ConfirmationNumber, People, EventAvailable, AttachMoney,
-  CalendarMonth, ViewList, Store, LocalOffer,
+  CalendarMonth, ViewList, Store, LocalOffer, SportsEsports,
 } from "@mui/icons-material";
 import { Link as RouterLink } from "react-router-dom";
 import api from "../../api/client";
@@ -66,6 +66,7 @@ export default function AdminDashboard() {
             { label: "Catalog", href: "/admin/catalog", icon: <ViewList />, color: "#0891B2" },
             { label: "Venue", href: "/admin/venue", icon: <Store />, color: "#16A34A" },
             { label: "Discount Codes", href: "/admin/discounts", icon: <LocalOffer />, color: BRAND.gold },
+            { label: "VR Management", href: "/admin/vr-management", icon: <SportsEsports />, color: "#7C3AED" },
           ].map((nav) => (
             <Grid item xs={6} sm={3} key={nav.href}>
               <Card
