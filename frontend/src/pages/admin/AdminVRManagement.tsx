@@ -50,6 +50,7 @@ import {
   createGame,
   createHeadset,
   createInstallation,
+  fetchGame,
   fetchGames,
   fetchHeadsets,
   fetchInstallations,
@@ -143,25 +144,32 @@ function GamesTab() {
     setDialogOpen(true);
   };
 
-  const openEdit = (g: VRGame) => {
-    setEditGame(g);
-    // Pre-populate categories from existing single value (API returns one string)
+  const openEdit = async (g: VRGame) => {
+    setError(null);
+    // Fetch full game detail — the list endpoint only returns id/name/category/thumbnail/status
+    let full: VRGame = g;
+    try {
+      const res = await fetchGame(g.id);
+      full = res.data;
+    } catch {
+      // fall back to list data if detail fetch fails
+    }
+    setEditGame(full);
     setSelectedCategories(
-      g.category && VR_CATEGORIES.includes(g.category as VRGameCategory)
-        ? [g.category as VRGameCategory]
+      full.category && VR_CATEGORIES.includes(full.category as VRGameCategory)
+        ? [full.category as VRGameCategory]
         : []
     );
     setForm({
-      name: g.name ?? "",
-      description: g.description ?? "",
-      category: (g.category as VRGameCategory) ?? "Action",
-      thumbnail_url: g.thumbnail_url ?? "",
-      youtube_url: g.youtube_url ?? "",
-      viewable_age: g.viewable_age ?? 7,
-      is_multiplayer: g.is_multiplayer ?? false,
-      status: (g.status as VRGameStatus) ?? "ACTIVE",
+      name: full.name ?? "",
+      description: full.description ?? "",
+      category: (full.category as VRGameCategory) ?? "Action",
+      thumbnail_url: full.thumbnail_url ?? "",
+      youtube_url: (full as any).youtube_url ?? (full as any).video_url ?? "",
+      viewable_age: full.viewable_age ?? 7,
+      is_multiplayer: full.is_multiplayer ?? false,
+      status: (full.status as VRGameStatus) ?? "ACTIVE",
     });
-    setError(null);
     setDialogOpen(true);
   };
 
