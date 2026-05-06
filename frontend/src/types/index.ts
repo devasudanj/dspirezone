@@ -104,6 +104,9 @@ export interface Booking {
   price_breakdown?: PriceBreakdown;
   razorpay_invoice_id?: string;
   razorpay_invoice_short_url?: string;
+  razorpay_food_invoice_id?: string;
+  razorpay_food_invoice_short_url?: string;
+  food_amount_pretax?: number;
 }
 
 export interface BookingLineItemInput {
@@ -160,6 +163,20 @@ export interface RazorpayInvoiceOut {
   status: string;
   amount: number;
   booking_id: number;
+}
+
+export interface SplitInvoiceOut {
+  booking_id: number;
+  event_invoice_id: string;
+  event_invoice_ref: string;
+  event_invoice_short_url: string;
+  event_invoice_status: string;
+  event_invoice_amount: number;
+  food_invoice_id?: string;
+  food_invoice_ref?: string;
+  food_invoice_short_url?: string;
+  food_invoice_status?: string;
+  food_invoice_amount?: number;
 }
 
 export interface UpdateBookingPayload {

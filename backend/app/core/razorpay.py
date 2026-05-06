@@ -174,3 +174,38 @@ def get_invoice(invoice_id: str) -> dict:
         resp = client.get(f"{_BASE_URL}/invoices/{invoice_id}", auth=_auth())
         resp.raise_for_status()
         return resp.json()
+
+
+def issue_invoice(invoice_id: str) -> dict:
+    """
+    Issue a Razorpay invoice (move it from 'draft' → 'issued').
+    Only issued invoices have a short_url / hosted payment page.
+    If the invoice is already issued (Razorpay returns 400), returns its current state.
+    """
+    with httpx.Client(timeout=15) as client:
+        resp = client.post(f"{_BASE_URL}/invoices/{invoice_id}/issue", auth=_auth())
+        if resp.status_code == 400:
+            # Invoice may already be issued — fetch and return current state
+            logger.warning("issue_invoice got 400 for %s (possibly already issued), fetching current state", invoice_id)
+            get_resp = client.get(f"{_BASE_URL}/invoices/{invoice_id}", auth=_auth())
+            get_resp.raise_for_status()
+            return get_resp.json()
+        resp.raise_for_status()
+        return resp.json()
+
+
+def cancel_invoice(invoice_id: str) -> dict:
+    """
+    Cancel a Razorpay invoice (draft or issued, but NOT paid).
+    Silently returns the current state if already cancelled or paid.
+    """
+    with httpx.Client(timeout=15) as client:
+        resp = client.post(f"{_BASE_URL}/invoices/{invoice_id}/cancel", auth=_auth())
+        if resp.status_code in (400, 409):
+            # Already cancelled / paid — fetch and return current state
+            logger.warning("cancel_invoice got %s for %s, fetching current state", resp.status_code, invoice_id)
+            get_resp = client.get(f"{_BASE_URL}/invoices/{invoice_id}", auth=_auth())
+            get_resp.raise_for_status()
+            return get_resp.json()
+        resp.raise_for_status()
+        return resp.json()

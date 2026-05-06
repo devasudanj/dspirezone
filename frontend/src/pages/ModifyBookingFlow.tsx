@@ -21,7 +21,7 @@ import PriceBreakdown from "../components/PriceBreakdown";
 import { BRAND } from "../theme";
 import type {
   Venue, CatalogItem, AvailableSlot, PriceBreakdown as PriceBreakdownType,
-  BookingWithPayments, BookingLineItem, Payment, BookingAuditLog, RazorpayInvoiceOut,
+  BookingWithPayments, BookingLineItem, Payment, BookingAuditLog, SplitInvoiceOut,
 } from "../types";
 
 // ─── Food menu (must exactly mirror BookingFlow.tsx) ─────────────────────────
@@ -179,7 +179,7 @@ export default function ModifyBookingFlow() {
 
   // Invoice
   const [invoiceLoading, setInvoiceLoading] = useState(false);
-  const [invoiceData, setInvoiceData] = useState<RazorpayInvoiceOut | null>(null);
+  const [invoiceData, setInvoiceData] = useState<SplitInvoiceOut | null>(null);
   const [invoiceError, setInvoiceError] = useState("");
 
   const patchState = (patch: Partial<ModifyState>) =>
@@ -192,13 +192,23 @@ export default function ModifyBookingFlow() {
     api.get<BookingWithPayments>(`/bookings/by-code/${code.toUpperCase()}`)
       .then((r) => {
         setBooking(r.data);
-        if (r.data.razorpay_invoice_id && r.data.razorpay_invoice_short_url) {
+        if (r.data.razorpay_invoice_id) {
           setInvoiceData({
-            invoice_id: r.data.razorpay_invoice_id,
-            short_url: r.data.razorpay_invoice_short_url,
-            status: "generated",
-            amount: r.data.total_price,
             booking_id: r.data.id,
+            event_invoice_id: r.data.razorpay_invoice_id,
+            event_invoice_ref: `DZ/E/-${String(r.data.id).padStart(5, "0")}`,
+            event_invoice_short_url: r.data.razorpay_invoice_short_url || "",
+            event_invoice_status: "issued",
+            event_invoice_amount: r.data.total_price,
+            food_invoice_id: r.data.razorpay_food_invoice_id || undefined,
+            food_invoice_ref: r.data.razorpay_food_invoice_id
+              ? `DZ/G/-${String(r.data.id).padStart(5, "0")}`
+              : undefined,
+            food_invoice_short_url: r.data.razorpay_food_invoice_short_url || undefined,
+            food_invoice_status: r.data.razorpay_food_invoice_id ? "issued" : undefined,
+            food_invoice_amount: r.data.food_amount_pretax
+              ? Math.round(r.data.food_amount_pretax * 1.05 * 100) / 100
+              : undefined,
           });
         }
       })
@@ -288,12 +298,17 @@ export default function ModifyBookingFlow() {
     return sum + (m.step > 1 ? (qty / m.step) * m.price : m.price * qty);
   }, 0);
 
-  // GST: Tamil Nadu — CGST 9% + SGST 9% = 18%
-  // When a fresh priceBreakdown is available apply GST to (venue + food).
-  // When not (no changes made), booking.total_price already includes GST for new bookings.
+  // GST: event services @ 18%, food @ 5%.
+  // `booking.total_price` already includes event+GST and food+GST as committed to DB.
+  // `foodSubtotal` is the current (possibly edited) food selection.
+  // When venue/duration/addons changed, `priceBreakdown` holds the fresh event base price.
+  // When only food changed (no priceBreakdown), compute delta against the saved food amount.
+  const savedFoodPretax = booking?.food_amount_pretax ?? 0;
   const newTotal = priceBreakdown
-    ? Math.round((priceBreakdown.total + foodSubtotal) * 1.18 * 100) / 100
-    : (booking?.total_price ?? 0) + Math.round(foodSubtotal * 1.18 * 100) / 100;
+    // Venue details changed: recompute everything from scratch
+    ? Math.round((priceBreakdown.total * 1.18 + foodSubtotal * 1.05) * 100) / 100
+    // No venue change: start from DB total, adjust only for any food delta
+    : Math.round(((booking?.total_price ?? 0) + (foodSubtotal - savedFoodPretax) * 1.05) * 100) / 100;
   const totalPaid = booking?.total_paid ?? 0;
   const remainingDue = Math.max(0, newTotal - totalPaid);
   const isOverpaid = totalPaid > newTotal;
@@ -337,6 +352,7 @@ export default function ModifyBookingFlow() {
         foodcourt_table_notes: state.foodcourtTableNotes || undefined,
         notes: notesStr,
         line_items: lineItems,
+        food_amount_pretax: foodSubtotal > 0 ? foodSubtotal : 0,
         contact_name: state.contactName || undefined,
         contact_email: state.contactEmail || undefined,
         contact_phone: state.contactPhone || undefined,
@@ -351,14 +367,15 @@ export default function ModifyBookingFlow() {
     }
   };
 
-  const handleGenerateInvoice = async () => {
+  const handleGenerateInvoice = async (forceRegenerate = false) => {
     if (!booking || !code) return;
     setInvoiceLoading(true);
     setInvoiceError("");
     try {
-      const res = await api.post<RazorpayInvoiceOut>("/payments/invoice", {
+      const res = await api.post<SplitInvoiceOut>("/payments/invoice", {
         booking_id: booking.id,
         confirmation_code: code.toUpperCase(),
+        force_regenerate: forceRegenerate,
       });
       setInvoiceData(res.data);
     } catch (err: unknown) {
@@ -915,37 +932,91 @@ export default function ModifyBookingFlow() {
             <Divider sx={{ mb: 2 }} />
 
             {invoiceData ? (
-              <Stack spacing={1.5}>
-                <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
-                  <CheckCircle sx={{ color: "success.main", fontSize: 20 }} />
-                  <Typography variant="body2" color="success.main" fontWeight={600}>
-                    Invoice {invoiceData.invoice_id}
+              <Stack spacing={2}>
+                {/* Event Invoice */}
+                <Box sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+                  <Stack direction="row" alignItems="center" spacing={1} mb={1} flexWrap="wrap">
+                    <CheckCircle sx={{ color: "success.main", fontSize: 18 }} />
+                    <Typography variant="body2" fontWeight={600}>
+                      {invoiceData.event_invoice_ref}
+                    </Typography>
+                    <Chip label="Event · 18% GST" size="small" sx={{ bgcolor: "#ede7f6", color: "#4a148c", fontSize: "0.68rem" }} />
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                    ₹{invoiceData.event_invoice_amount.toLocaleString("en-IN")} · Status: {invoiceData.event_invoice_status}
                   </Typography>
-                </Stack>
-                <Button
-                  variant="contained"
-                  size="small"
-                  href={invoiceData.short_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={{ alignSelf: "flex-start", bgcolor: BRAND.purple, "&:hover": { bgcolor: "#3a0a72" } }}
-                >
-                  View Invoice
-                </Button>
+                  {invoiceData.event_invoice_short_url ? (
+                    <Button
+                      component="a"
+                      href={invoiceData.event_invoice_short_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      variant="contained"
+                      size="small"
+                      sx={{ bgcolor: BRAND.purple, "&:hover": { bgcolor: "#3a0a72" } }}
+                    >
+                      View Event Invoice
+                    </Button>
+                  ) : (
+                    <Typography variant="caption" color="warning.main">Link not available yet (draft)</Typography>
+                  )}
+                </Box>
+
+                {/* Food Invoice */}
+                {invoiceData.food_invoice_id && (
+                  <Box sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+                    <Stack direction="row" alignItems="center" spacing={1} mb={1} flexWrap="wrap">
+                      <CheckCircle sx={{ color: "success.main", fontSize: 18 }} />
+                      <Typography variant="body2" fontWeight={600}>
+                        {invoiceData.food_invoice_ref}
+                      </Typography>
+                      <Chip label="Food · 5% GST" size="small" sx={{ bgcolor: "#e8f5e9", color: "#1b5e20", fontSize: "0.68rem" }} />
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                      ₹{(invoiceData.food_invoice_amount ?? 0).toLocaleString("en-IN")} · Status: {invoiceData.food_invoice_status}
+                    </Typography>
+                    {invoiceData.food_invoice_short_url ? (
+                      <Button
+                        component="a"
+                        href={invoiceData.food_invoice_short_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        variant="contained"
+                        size="small"
+                        sx={{ bgcolor: "#2e7d32", "&:hover": { bgcolor: "#1b5e20" } }}
+                      >
+                        View Food Invoice
+                      </Button>
+                    ) : (
+                      <Typography variant="caption" color="warning.main">Link not available yet (draft)</Typography>
+                    )}
+                  </Box>
+                )}
+
                 <Button
                   variant="text"
                   size="small"
-                  onClick={() => void handleGenerateInvoice()}
+                  onClick={() => void handleGenerateInvoice(false)}
                   disabled={invoiceLoading}
                   sx={{ alignSelf: "flex-start" }}
                 >
                   {invoiceLoading ? "Refreshing…" : "Refresh Invoice Status"}
                 </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  color="warning"
+                  onClick={() => void handleGenerateInvoice(true)}
+                  disabled={invoiceLoading}
+                  sx={{ alignSelf: "flex-start" }}
+                >
+                  Regenerate Invoices (after modifications)
+                </Button>
               </Stack>
             ) : (
               <Stack spacing={1.5}>
                 <Typography variant="body2" color="text.secondary">
-                  Download or view a hosted invoice for this booking.
+                  Download or view hosted invoices for this booking.
                 </Typography>
                 {invoiceError && (
                   <Typography variant="body2" color="error">{invoiceError}</Typography>
@@ -953,7 +1024,7 @@ export default function ModifyBookingFlow() {
                 <Button
                   variant="outlined"
                   size="small"
-                  onClick={() => void handleGenerateInvoice()}
+                  onClick={() => void handleGenerateInvoice(false)}
                   disabled={invoiceLoading}
                   sx={{ alignSelf: "flex-start" }}
                 >

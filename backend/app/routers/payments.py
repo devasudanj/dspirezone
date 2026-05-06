@@ -28,6 +28,7 @@ from ..schemas import (
     RazorpayInvoiceOut,
     RazorpayOrderCreate,
     RazorpayOrderOut,
+    SplitInvoiceOut,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,7 @@ def create_order(
         )
 
     # --- Create Razorpay order ---
-    receipt = f"dz-{booking.confirmation_code}"
+    receipt = f"DZ-EFG-{booking.id:05d}"
     min_partial = payload.min_partial_amount
     if min_partial is not None and min_partial < 1.0:
         min_partial = 1.0
@@ -258,9 +259,10 @@ def verify_payment(
 class _InvoiceRequest(BaseModel):
     booking_id: int
     confirmation_code: Optional[str] = None
+    force_regenerate: bool = False  # cancel & recreate invoices with current booking data
 
 
-@router.post("/invoice", response_model=RazorpayInvoiceOut)
+@router.post("/invoice", response_model=SplitInvoiceOut)
 def generate_invoice(
     payload: _InvoiceRequest,
     current_user: Optional[User] = Depends(get_optional_user),
@@ -296,28 +298,113 @@ def generate_invoice(
             detail="Invalid confirmation code or unauthorised",
         )
 
-    # --- If invoice already exists, refresh from Razorpay and return ---
-    if booking.razorpay_invoice_id:
+    # --- If event invoice already exists, refresh from Razorpay (and create food if missing) ---
+    if booking.razorpay_invoice_id and not payload.force_regenerate:
+        inv_seq = f"{booking.id:05d}"
+        event_inv_ref = f"DZ/E/{inv_seq}"
+        food_inv_ref = f"DZ/F/{inv_seq}"
+        customer_name = (booking.contact_name or "Guest").strip() or "Guest"
+
         try:
             inv = rzp.get_invoice(booking.razorpay_invoice_id)
         except httpx.HTTPStatusError as exc:
             logger.error("Razorpay get_invoice error: %s", exc.response.text)
             raise HTTPException(status_code=502, detail="Could not fetch invoice from payment gateway")
-        return RazorpayInvoiceOut(
-            invoice_id=inv["id"],
-            short_url=inv.get("short_url", booking.razorpay_invoice_short_url or ""),
-            status=inv.get("status", "unknown"),
-            amount=(inv.get("amount", 0) or 0) / 100,
+
+        event_id = inv["id"]
+        event_url = inv.get("short_url", booking.razorpay_invoice_short_url or "")
+        event_status = inv.get("status", "unknown")
+        event_amount = (inv.get("amount", 0) or 0) / 100
+
+        # Create food invoice if food was ordered but no food invoice exists yet
+        food_pretax = booking.food_amount_pretax or 0.0
+        if food_pretax > 0 and not booking.razorpay_food_invoice_id:
+            food_cgst = round(food_pretax * 0.025, 2)
+            food_sgst = round(food_pretax * 0.025, 2)
+            food_total_inr = round(food_pretax + food_cgst + food_sgst, 2)
+            try:
+                food_inv = rzp.create_invoice(
+                    customer_name=customer_name,
+                    customer_email=booking.contact_email or "",
+                    customer_phone=booking.contact_phone or None,
+                    description=(
+                        f"{food_inv_ref} | Booking {booking.confirmation_code} – {customer_name} | "
+                        f"Food & Beverages Invoice (5% GST) | "
+                        f"Food Total (incl. GST): INR {food_total_inr:,.2f}"
+                    ),
+                    line_items=[
+                        {"name": "Food & Beverages Selection", "amount": int(round(food_pretax * 100)), "quantity": 1},
+                        {"name": "CGST @ 2.5% (Tamil Nadu) – Food", "amount": int(round(food_cgst * 100)), "quantity": 1},
+                        {"name": "SGST @ 2.5% (Tamil Nadu) – Food", "amount": int(round(food_sgst * 100)), "quantity": 1},
+                    ],
+                    currency=settings.RAZORPAY_CURRENCY,
+                    notes={
+                        "Invoice_No": food_inv_ref,
+                        "Invoice_Type": "Food & Beverages (5% GST)",
+                        "Food_Total": f"INR {food_total_inr:,.2f}",
+                        "Confirmation": booking.confirmation_code,
+                    },
+                )
+                # Issue so it gets a short_url
+                food_inv = rzp.issue_invoice(food_inv["id"])
+                booking.razorpay_food_invoice_id = food_inv["id"]
+                booking.razorpay_food_invoice_short_url = food_inv.get("short_url", "")
+                db.commit()
+            except Exception as exc:
+                logger.error("Razorpay food invoice creation (late) failed: %s", exc)
+
+        # Refresh food invoice status if it exists
+        food_id = booking.razorpay_food_invoice_id
+        food_url = booking.razorpay_food_invoice_short_url or ""
+        food_status = None
+        food_amount = None
+        if food_id:
+            try:
+                fi = rzp.get_invoice(food_id)
+                food_url = fi.get("short_url", food_url)
+                food_status = fi.get("status", "unknown")
+                food_amount = (fi.get("amount", 0) or 0) / 100
+            except Exception:
+                food_status = "unknown"
+
+        return SplitInvoiceOut(
             booking_id=booking.id,
+            event_invoice_id=event_id,
+            event_invoice_ref=event_inv_ref,
+            event_invoice_short_url=event_url,
+            event_invoice_status=event_status,
+            event_invoice_amount=event_amount,
+            food_invoice_id=food_id or None,
+            food_invoice_ref=food_inv_ref if food_id else None,
+            food_invoice_short_url=food_url or None,
+            food_invoice_status=food_status,
+            food_invoice_amount=food_amount,
         )
 
-    # --- Build line_items from booking ---
+    # --- force_regenerate: cancel existing invoices and recreate with current booking data ---
+    if booking.razorpay_invoice_id and payload.force_regenerate:
+        for inv_id in [booking.razorpay_invoice_id, booking.razorpay_food_invoice_id]:
+            if not inv_id:
+                continue
+            try:
+                cancelled = rzp.cancel_invoice(inv_id)
+                logger.info("Cancelled invoice %s status=%s for regeneration (booking %s)", inv_id, cancelled.get("status"), booking.id)
+            except Exception as exc:
+                logger.warning("Could not cancel invoice %s: %s", inv_id, exc)
+        booking.razorpay_invoice_id = None
+        booking.razorpay_invoice_short_url = None
+        booking.razorpay_food_invoice_id = None
+        booking.razorpay_food_invoice_short_url = None
+        db.commit()
+        logger.info("Cleared invoice IDs for booking %s – will regenerate", booking.id)
+
+    # --- Build EVENT line_items from booking (venue, add-ons, favors — 18% GST) ---
     customer_name = (booking.contact_name or "Guest").strip() or "Guest"
 
-    line_items: list[dict] = []
-    duration_hours: float = 0.0  # computed below if times are available
+    event_items: list[dict] = []   # line items for event invoice (pre-GST amounts in paise)
+    duration_hours: float = 0.0
 
-    # 1. Event space – hourly charge (base_hourly_rate × duration_hours)
+    # 1. Event space – hourly charge
     venue = booking.venue
     if booking.start_time and booking.end_time and venue:
         start_mins = booking.start_time.hour * 60 + booking.start_time.minute
@@ -325,28 +412,27 @@ def generate_invoice(
         duration_hours = (end_mins - start_mins) / 60.0
         if duration_hours > 0:
             hourly_rate = venue.base_hourly_rate or 1500.0
-            venue_total_paise = int(round(hourly_rate * duration_hours * 100))
-            line_items.append({
+            event_items.append({
                 "name": f"Event Space – {duration_hours:g} hr × ₹{hourly_rate:,.0f}/hr",
                 "amount": int(round(hourly_rate * 100)),   # unit price in paise
                 "quantity": int(duration_hours) if duration_hours == int(duration_hours) else duration_hours,
             })
 
-        # 2. Extra rooms (if any)
+        # 2. Extra rooms
         if (booking.extra_rooms_count or 0) > 0 and venue.extra_room_hourly_rate:
             extra_rate = venue.extra_room_hourly_rate
             qty = booking.extra_rooms_count
-            line_items.append({
+            event_items.append({
                 "name": f"Extra Room × {qty} – {duration_hours:g} hr @ ₹{extra_rate:,.0f}/hr each",
                 "amount": int(round(extra_rate * duration_hours * 100)),
                 "quantity": qty,
             })
 
-        # 3. Food court tables (if any)
+        # 3. Food court tables
         if (booking.foodcourt_tables_count or 0) > 0 and venue.foodcourt_table_rate:
             fc_rate = venue.foodcourt_table_rate
             fc_qty  = booking.foodcourt_tables_count
-            line_items.append({
+            event_items.append({
                 "name": f"Food Court Table × {fc_qty}",
                 "amount": int(round(fc_rate * 100)),
                 "quantity": fc_qty,
@@ -361,8 +447,6 @@ def generate_invoice(
             quantity = getattr(li, "quantity", 1) or 1
             line_total = getattr(li, "line_total", None)
 
-            # Use pre-computed line_total so hourly items reflect full charge
-            # (unit_price × duration_hours already calculated at booking time).
             if line_total is not None and line_total > 0:
                 total_to_use = line_total
             else:
@@ -370,7 +454,6 @@ def generate_invoice(
 
             amount_paise = int(round(total_to_use * 100))
 
-            # Annotate hourly items so the invoice label is clear
             if price_type == "per_hour" and duration_hours > 0:
                 label = f"{name} ({duration_hours:g} hr × ₹{unit_price:,.0f}/hr)"
             elif price_type == "per_unit" and quantity != 1:
@@ -379,91 +462,213 @@ def generate_invoice(
                 label = name
 
             if amount_paise > 0:
-                line_items.append({
+                event_items.append({
                     "name": label,
                     "amount": amount_paise,
                     "quantity": 1,
                 })
 
-    # GST: Tamil Nadu — CGST 9% + SGST 9% = 18% on top of all service line items
-    if line_items:
-        pre_gst_base = booking.total_price / 1.18
-        cgst_inv = round(pre_gst_base * 0.09, 2)
-        sgst_inv = round(pre_gst_base * 0.09, 2)
-        if cgst_inv > 0:
-            line_items.append({
-                "name": "CGST @ 9% (Tamil Nadu)",
-                "amount": int(round(cgst_inv * 100)),
-                "quantity": 1,
-            })
-        if sgst_inv > 0:
-            line_items.append({
-                "name": "SGST @ 9% (Tamil Nadu)",
-                "amount": int(round(sgst_inv * 100)),
-                "quantity": 1,
-            })
+    # Compute event subtotal from actual line items then add GST at 18%
+    event_subtotal_inr = sum(
+        (item["amount"] / 100) * item["quantity"] for item in event_items
+    )
+    event_cgst = round(event_subtotal_inr * 0.09, 2)
+    event_sgst = round(event_subtotal_inr * 0.09, 2)
 
-    if not line_items:
-        # Fallback: single line item for total price
-        line_items = [{
+    event_line_items = list(event_items)
+    if event_cgst > 0:
+        event_line_items.append({
+            "name": "CGST @ 9% (Tamil Nadu) – Event Services",
+            "amount": int(round(event_cgst * 100)),
+            "quantity": 1,
+        })
+    if event_sgst > 0:
+        event_line_items.append({
+            "name": "SGST @ 9% (Tamil Nadu) – Event Services",
+            "amount": int(round(event_sgst * 100)),
+            "quantity": 1,
+        })
+
+    if not event_line_items:
+        # Fallback: single line item for the event portion of total_price
+        food_pretax = booking.food_amount_pretax or 0.0
+        food_with_gst = round(food_pretax * 1.05, 2)
+        event_amount = max(0.0, booking.total_price - food_with_gst)
+        event_line_items = [{
             "name": f"Booking {booking.confirmation_code}",
-            "amount": int(round(booking.total_price * 100)),
+            "amount": int(round(event_amount * 100)),
             "quantity": 1,
         }]
 
-    # Compute total already paid for this booking
-    total_paid = sum(
+    # Invoice reference numbers: DZ/E/XXXXX and DZ/F/XXXXX (shared numeric part = booking.id)
+    inv_seq = f"{booking.id:05d}"
+    event_inv_ref = f"DZ/E/{inv_seq}"
+
+    event_total_paid = sum(
         p.amount for p in booking.payments if p.status == PaymentStatus.completed
     )
-    balance_due = max(0.0, booking.total_price - total_paid)
+    event_balance_due = max(0.0, booking.total_price - event_total_paid)
 
-    # Embed payment summary in description — shows prominently on the hosted invoice
-    description = (
-        f"Booking {booking.confirmation_code} – {customer_name} | "
+    event_description = (
+        f"{event_inv_ref} | Booking {booking.confirmation_code} – {customer_name} | "
+        f"Event Invoice (18% GST) | "
         f"Order Total: INR {booking.total_price:,.2f} | "
-        f"Advance Paid: INR {total_paid:,.2f} | "
-        f"Balance Due: INR {balance_due:,.2f}"
+        f"Advance Paid: INR {event_total_paid:,.2f} | "
+        f"Balance Due: INR {event_balance_due:,.2f}"
     )
 
-    invoice_notes: dict = {
-        "Order_Total": f"INR {booking.total_price:,.2f}",
-        "Amount_Paid": f"INR {total_paid:,.2f}",
-        "Balance_Due": f"INR {balance_due:,.2f}",
-        "Confirmation": booking.confirmation_code,
-    }
+    # Razorpay line_items don't support negative amounts, so we cannot show a
+    # deduction inline.  When an advance has been paid, collapse to a single
+    # "Balance Due" line item so the invoice total = amount the customer still owes.
+    # When nothing has been paid the full itemised breakdown is used.
+    # When fully paid the full itemised list serves as a receipt (balance = 0).
+    if event_total_paid > 0 and event_balance_due > 0:
+        invoice_line_items = [
+            {
+                "name": (
+                    f"Balance Due – Event Services (18% GST incl.) | "
+                    f"Full value: INR {booking.total_price:,.2f} | "
+                    f"Advance paid: INR {event_total_paid:,.2f}"
+                ),
+                "amount": int(round(event_balance_due * 100)),
+                "quantity": 1,
+            }
+        ]
+    else:
+        # No advance paid → full itemised breakdown; or fully paid → receipt
+        invoice_line_items = event_line_items
 
     try:
         inv = rzp.create_invoice(
             customer_name=customer_name,
             customer_email=booking.contact_email or "",
             customer_phone=booking.contact_phone or None,
-            description=description,
-            line_items=line_items,
+            description=event_description,
+            line_items=invoice_line_items,
             currency=settings.RAZORPAY_CURRENCY,
-            notes=invoice_notes,
+            notes={
+                "Invoice_No": event_inv_ref,
+                "Invoice_Type": "Event (18% GST)",
+                "Order_Total": f"INR {booking.total_price:,.2f}",
+                "Amount_Paid": f"INR {event_total_paid:,.2f}",
+                "Balance_Due": f"INR {event_balance_due:,.2f}",
+                "Confirmation": booking.confirmation_code,
+            },
         )
     except httpx.HTTPStatusError as exc:
         logger.error("Razorpay create_invoice HTTP error: %s – %s", exc.response.status_code, exc.response.text)
-        raise HTTPException(status_code=502, detail="Invoice creation failed. Please try again.")
+        raise HTTPException(status_code=502, detail=f"Event invoice creation failed: {exc.response.text}")
     except Exception as exc:
         logger.error("Razorpay create_invoice failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Invoice creation failed. Please try again.")
+        raise HTTPException(status_code=502, detail=f"Event invoice creation failed: {exc}")
 
+    # Save draft invoice ID immediately so we don't lose it if issuing fails
     booking.razorpay_invoice_id = inv["id"]
     booking.razorpay_invoice_short_url = inv.get("short_url", "")
     db.commit()
 
+    # Issue the invoice so it gets a short_url (draft invoices have no link)
+    try:
+        inv = rzp.issue_invoice(inv["id"])
+        booking.razorpay_invoice_short_url = inv.get("short_url", "")
+    except httpx.HTTPStatusError as exc:
+        logger.error("Razorpay issue_invoice HTTP error: %s – %s", exc.response.status_code, exc.response.text)
+        raise HTTPException(status_code=502, detail=f"Event invoice created but could not be issued: {exc.response.text}")
+    except Exception as exc:
+        logger.error("Razorpay issue_invoice failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Event invoice created but could not be issued: {exc}")
+
+    # --- Create FOOD invoice if food items were ordered (5% GST) ---
+    food_pretax = booking.food_amount_pretax or 0.0
+    if food_pretax > 0 and not booking.razorpay_food_invoice_id:
+        food_cgst = round(food_pretax * 0.025, 2)
+        food_sgst = round(food_pretax * 0.025, 2)
+        food_inv_ref = f"DZ/F/{inv_seq}"
+
+        food_line_items = [
+            {
+                "name": "Food & Beverages Selection",
+                "amount": int(round(food_pretax * 100)),
+                "quantity": 1,
+            },
+            {
+                "name": "CGST @ 2.5% (Tamil Nadu) – Food",
+                "amount": int(round(food_cgst * 100)),
+                "quantity": 1,
+            },
+            {
+                "name": "SGST @ 2.5% (Tamil Nadu) – Food",
+                "amount": int(round(food_sgst * 100)),
+                "quantity": 1,
+            },
+        ]
+
+        food_total = round(food_pretax + food_cgst + food_sgst, 2)
+
+        try:
+            food_inv = rzp.create_invoice(
+                customer_name=customer_name,
+                customer_email=booking.contact_email or "",
+                customer_phone=booking.contact_phone or None,
+                description=(
+                    f"{food_inv_ref} | Booking {booking.confirmation_code} – {customer_name} | "
+                    f"Food & Beverages Invoice (5% GST) | "
+                    f"Food Total (incl. GST): INR {food_total:,.2f}"
+                ),
+                line_items=food_line_items,
+                currency=settings.RAZORPAY_CURRENCY,
+                notes={
+                    "Invoice_No": food_inv_ref,
+                    "Invoice_Type": "Food & Beverages (5% GST)",
+                    "Food_Total": f"INR {food_total:,.2f}",
+                    "Confirmation": booking.confirmation_code,
+                },
+            )
+            # Issue the invoice so it gets a short_url
+            food_inv = rzp.issue_invoice(food_inv["id"])
+            booking.razorpay_food_invoice_id = food_inv["id"]
+            booking.razorpay_food_invoice_short_url = food_inv.get("short_url", "")
+            logger.info(
+                "Food invoice created+issued: %s  booking=%s  short_url=%s",
+                food_inv["id"], booking.id, food_inv.get("short_url"),
+            )
+        except Exception as exc:
+            # Food invoice failure is non-fatal — event invoice was already created
+            logger.error("Razorpay food invoice creation failed: %s", exc)
+
+    db.commit()
+
     logger.info(
-        "Invoice created: %s  booking=%s  short_url=%s",
+        "Event invoice created+issued: %s  booking=%s  short_url=%s",
         inv["id"], booking.id, inv.get("short_url"),
     )
 
-    return RazorpayInvoiceOut(
-        invoice_id=inv["id"],
-        short_url=inv.get("short_url", ""),
-        status=inv.get("status", "draft"),
-        amount=(inv.get("amount", 0) or 0) / 100,
+    inv_seq = f"{booking.id:05d}"
+    food_inv_ref_val = f"DZ/F/{inv_seq}"
+
+    food_pretax2 = booking.food_amount_pretax or 0.0
+    food_id2 = booking.razorpay_food_invoice_id
+    food_url2 = booking.razorpay_food_invoice_short_url or ""
+    food_status2: Optional[str] = None
+    food_amount2: Optional[float] = None
+    if food_pretax2 > 0 and food_id2:
+        food_cgst2 = round(food_pretax2 * 0.025, 2)
+        food_sgst2 = round(food_pretax2 * 0.025, 2)
+        food_amount2 = round(food_pretax2 + food_cgst2 + food_sgst2, 2)
+        food_status2 = inv.get("status", "issued")  # same status lifecycle as event
+
+    return SplitInvoiceOut(
         booking_id=booking.id,
+        event_invoice_id=inv["id"],
+        event_invoice_ref=event_inv_ref,
+        event_invoice_short_url=inv.get("short_url", ""),
+        event_invoice_status=inv.get("status", "draft"),
+        event_invoice_amount=(inv.get("amount", 0) or 0) / 100,
+        food_invoice_id=food_id2 or None,
+        food_invoice_ref=food_inv_ref_val if food_id2 else None,
+        food_invoice_short_url=food_url2 or None,
+        food_invoice_status=food_status2,
+        food_invoice_amount=food_amount2,
     )
 
 

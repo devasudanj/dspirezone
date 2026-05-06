@@ -239,11 +239,10 @@ def create_booking(
         extra_rooms_count=payload.extra_rooms_count,
     )
 
-    # Generate unique confirmation code
-    for _ in range(10):
-        code = _gen_code()
-        if not db.query(Booking).filter(Booking.confirmation_code == code).first():
-            break
+    # Food items are taxed at 5% GST (CGST 2.5% + SGST 2.5%) — tracked separately
+    food_pretax = payload.food_amount_pretax or 0.0
+    food_gst = round(food_pretax * 0.05, 2)
+    total_price = round(breakdown["total_with_gst"] + food_pretax + food_gst, 2)
 
     booking = Booking(
         venue_id=venue.id,
@@ -252,8 +251,9 @@ def create_booking(
         start_time=payload.start_time,
         end_time=end_time,
         status=BookingStatus.confirmed,
-        total_price=breakdown["total_with_gst"],
-        confirmation_code=code,
+        total_price=total_price,
+        food_amount_pretax=food_pretax,
+        confirmation_code="PENDING",  # updated to ID-based code after flush
         contact_name=payload.guest_name or booking_user.name,
         contact_email=(payload.guest_email.lower() if payload.guest_email else booking_user.email),
         contact_phone=payload.guest_phone,
@@ -265,6 +265,8 @@ def create_booking(
     )
     db.add(booking)
     db.flush()  # get booking.id before adding line items
+    # Assign ID-based confirmation code now that booking.id is available
+    booking.confirmation_code = f"DZ-EFG-{booking.id:05d}"
 
     for li in db_line_items:
         li.booking_id = booking.id
@@ -280,7 +282,7 @@ def create_booking(
         end_time=booking.end_time,
         name=booking.contact_name or booking_user.name,
         email=booking.contact_email or booking_user.email,
-        confirmation_code=code,
+        confirmation_code=booking.confirmation_code,
         total_price=booking.total_price,
     )
     if cal_uid:
@@ -532,8 +534,14 @@ def update_booking(
         changes.append(f"Food court tables: {booking.foodcourt_tables_count} → {new_foodcourt_tables}")
     old_total = booking.total_price
     new_total = breakdown["total_with_gst"]
-    if abs(old_total - new_total) > 0.01:
-        changes.append(f"Total price: ₹{old_total:,.0f} → ₹{new_total:,.0f}")
+    new_food_pretax_for_log = (
+        payload.food_amount_pretax
+        if payload.food_amount_pretax is not None
+        else (booking.food_amount_pretax or 0.0)
+    )
+    new_total_incl_food = round(new_total + new_food_pretax_for_log + round(new_food_pretax_for_log * 0.05, 2), 2)
+    if abs(old_total - new_total_incl_food) > 0.01:
+        changes.append(f"Total price: ₹{old_total:,.0f} → ₹{new_total_incl_food:,.0f}")
     if payload.line_items is not None:
         changes.append("Line items updated")
     if payload.contact_name and payload.contact_name != booking.contact_name:
@@ -565,7 +573,15 @@ def update_booking(
     booking.end_time = new_end_time
     booking.extra_rooms_count = new_extra_rooms
     booking.foodcourt_tables_count = new_foodcourt_tables
-    booking.total_price = new_total
+    # Include food in total_price if provided
+    new_food_pretax: float = (
+        payload.food_amount_pretax
+        if payload.food_amount_pretax is not None
+        else (booking.food_amount_pretax or 0.0)
+    )
+    new_food_gst = round(new_food_pretax * 0.05, 2)
+    booking.food_amount_pretax = new_food_pretax
+    booking.total_price = round(new_total + new_food_pretax + new_food_gst, 2)
     if payload.foodcourt_table_notes is not None:
         booking.foodcourt_table_notes = payload.foodcourt_table_notes
     if payload.notes is not None:

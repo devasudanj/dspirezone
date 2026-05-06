@@ -28,7 +28,7 @@ import {
 import { Link as RouterLink, useParams } from "react-router-dom";
 import api from "../../api/client";
 import { BRAND } from "../../theme";
-import type { BookingWithPayments, RazorpayInvoiceOut } from "../../types";
+import type { BookingWithPayments, SplitInvoiceOut } from "../../types";
 
 const STATUS_COLOR: Record<string, "success" | "warning" | "error" | "default"> = {
   confirmed: "success",
@@ -65,7 +65,7 @@ export default function AdminBookingDetails() {
 
   // Invoice
   const [invoiceLoading, setInvoiceLoading] = useState(false);
-  const [invoiceData, setInvoiceData] = useState<RazorpayInvoiceOut | null>(null);
+  const [invoiceData, setInvoiceData] = useState<SplitInvoiceOut | null>(null);
   const [invoiceError, setInvoiceError] = useState("");
 
   useEffect(() => {
@@ -76,14 +76,24 @@ export default function AdminBookingDetails() {
         setBooking(res.data);
         setAltEmail(res.data.alt_email ?? "");
         setAltPhone(res.data.alt_phone ?? "");
-        // Pre-fill invoice if already generated
+        // Pre-fill invoices if already generated
         if (res.data.razorpay_invoice_id && res.data.razorpay_invoice_short_url) {
+          const bookingId = res.data.id;
+          const seq = String(bookingId).padStart(5, "0");
           setInvoiceData({
-            invoice_id: res.data.razorpay_invoice_id,
-            short_url: res.data.razorpay_invoice_short_url,
-            status: "generated",
-            amount: res.data.total_price,
-            booking_id: res.data.id,
+            booking_id: bookingId,
+            event_invoice_id: res.data.razorpay_invoice_id,
+            event_invoice_ref: `DZ/E/-${seq}`,
+            event_invoice_short_url: res.data.razorpay_invoice_short_url,
+            event_invoice_status: "generated",
+            event_invoice_amount: res.data.total_price,
+            food_invoice_id: res.data.razorpay_food_invoice_id || undefined,
+            food_invoice_ref: res.data.razorpay_food_invoice_id ? `DZ/G/-${seq}` : undefined,
+            food_invoice_short_url: res.data.razorpay_food_invoice_short_url || undefined,
+            food_invoice_status: res.data.razorpay_food_invoice_id ? "generated" : undefined,
+            food_invoice_amount: res.data.food_amount_pretax
+              ? Math.round(res.data.food_amount_pretax * 1.05 * 100) / 100
+              : undefined,
           });
         }
       })
@@ -137,13 +147,14 @@ export default function AdminBookingDetails() {
     }
   };
 
-  const handleGenerateInvoice = async () => {
+  const handleGenerateInvoice = async (forceRegenerate = false) => {
     if (!booking) return;
     setInvoiceLoading(true);
     setInvoiceError("");
     try {
-      const res = await api.post<RazorpayInvoiceOut>("/payments/invoice", {
+      const res = await api.post<SplitInvoiceOut>("/payments/invoice", {
         booking_id: booking.id,
+        force_regenerate: forceRegenerate,
       });
       setInvoiceData(res.data);
     } catch (err: unknown) {
@@ -437,13 +448,13 @@ export default function AdminBookingDetails() {
 
             {/* ── Invoice ── */}
             <Paper sx={{ p: 3, borderRadius: 3 }}>
-              <Typography variant="h6" fontWeight={700} gutterBottom>Invoice</Typography>
+              <Typography variant="h6" fontWeight={700} gutterBottom>Invoices</Typography>
               <Divider sx={{ mb: 2 }} />
 
               {/* Payment Summary */}
               <Stack direction="row" spacing={3} sx={{ mb: 2, flexWrap: "wrap", gap: 1 }}>
                 <Box>
-                  <Typography variant="caption" color="text.secondary">Invoice Total</Typography>
+                  <Typography variant="caption" color="text.secondary">Total (incl. GST)</Typography>
                   <Typography fontWeight={700}>₹{Number(booking.total_price).toLocaleString("en-IN")}</Typography>
                 </Box>
                 <Box>
@@ -460,41 +471,108 @@ export default function AdminBookingDetails() {
               <Divider sx={{ mb: 2 }} />
 
               {invoiceData ? (
-                <Stack spacing={1.5}>
-                  <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
-                    <CheckCircle sx={{ color: "success.main", fontSize: 20 }} />
-                    <Typography variant="body2" color="success.main" fontWeight={600}>
-                      Invoice {invoiceData.invoice_id} generated
+                <Stack spacing={2}>
+                  {/* ── Event Invoice Card ── */}
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderColor: BRAND.purple + "66" }}>
+                    <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                      <CheckCircle sx={{ color: "success.main", fontSize: 18 }} />
+                      <Typography variant="body2" fontWeight={700} color="primary">
+                        Event Invoice
+                      </Typography>
+                      <Chip label="18% GST" size="small" color="primary" variant="outlined" sx={{ fontWeight: 700, fontSize: 11 }} />
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      {invoiceData.event_invoice_ref} &nbsp;·&nbsp; {invoiceData.event_invoice_id}
                     </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ textTransform: "capitalize" }}>
-                      ({invoiceData.status})
+                    <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+                      Status: <strong>{invoiceData.event_invoice_status}</strong>
+                      {invoiceData.event_invoice_amount ? ` · ₹${invoiceData.event_invoice_amount.toLocaleString("en-IN")}` : ""}
                     </Typography>
-                  </Stack>
-                  <Button
-                    variant="contained"
-                    size="small"
-                    startIcon={<OpenInNew />}
-                    href={invoiceData.short_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    sx={{ alignSelf: "flex-start", bgcolor: BRAND.purple, "&:hover": { bgcolor: "#3a0a72" } }}
-                  >
-                    View Invoice
-                  </Button>
+                    <Stack direction="row" spacing={1} flexWrap="wrap">
+                      {invoiceData.event_invoice_short_url && (
+                        <Button
+                          variant="contained"
+                          size="small"
+                          startIcon={<OpenInNew />}
+                          href={invoiceData.event_invoice_short_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          sx={{ bgcolor: BRAND.purple, "&:hover": { bgcolor: "#3a0a72" } }}
+                        >
+                          View Event Invoice
+                        </Button>
+                      )}
+                    </Stack>
+                  </Paper>
+
+                  {/* ── Food Invoice Card (shown when food was ordered) ── */}
+                  {invoiceData.food_invoice_id ? (
+                    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderColor: "#2e7d3266" }}>
+                      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                        <CheckCircle sx={{ color: "success.main", fontSize: 18 }} />
+                        <Typography variant="body2" fontWeight={700} color="success.dark">
+                          Food & Beverages Invoice
+                        </Typography>
+                        <Chip label="5% GST" size="small" color="success" variant="outlined" sx={{ fontWeight: 700, fontSize: 11 }} />
+                      </Stack>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        {invoiceData.food_invoice_ref} &nbsp;·&nbsp; {invoiceData.food_invoice_id}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+                        Status: <strong>{invoiceData.food_invoice_status}</strong>
+                        {invoiceData.food_invoice_amount ? ` · ₹${invoiceData.food_invoice_amount.toLocaleString("en-IN")}` : ""}
+                      </Typography>
+                      <Stack direction="row" spacing={1} flexWrap="wrap">
+                        {invoiceData.food_invoice_short_url && (
+                          <Button
+                            variant="contained"
+                            size="small"
+                            startIcon={<OpenInNew />}
+                            href={invoiceData.food_invoice_short_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            sx={{ bgcolor: "#2e7d32", "&:hover": { bgcolor: "#1b5e20" } }}
+                          >
+                            View Food Invoice
+                          </Button>
+                        )}
+                      </Stack>
+                    </Paper>
+                  ) : booking.food_amount_pretax && Number(booking.food_amount_pretax) > 0 ? (
+                    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderColor: "warning.main" }}>
+                      <Typography variant="body2" color="warning.dark" fontWeight={600} gutterBottom>
+                        Food invoice not yet generated
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Food items were ordered (₹{Number(booking.food_amount_pretax).toLocaleString("en-IN")} pre-tax). Click below to generate both invoices.
+                      </Typography>
+                    </Paper>
+                  ) : null}
+
                   <Button
                     variant="text"
                     size="small"
-                    onClick={handleGenerateInvoice}
+                    onClick={() => handleGenerateInvoice(false)}
                     disabled={invoiceLoading}
                     sx={{ alignSelf: "flex-start" }}
                   >
                     {invoiceLoading ? "Refreshing…" : "Refresh Invoice Status"}
                   </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    color="warning"
+                    onClick={() => handleGenerateInvoice(true)}
+                    disabled={invoiceLoading}
+                    sx={{ alignSelf: "flex-start" }}
+                  >
+                    Regenerate Invoices (after modifications)
+                  </Button>
                 </Stack>
               ) : (
                 <Stack spacing={1.5}>
                   <Typography variant="body2" color="text.secondary">
-                    Generate a Razorpay-hosted invoice for this booking.
+                    Generate Razorpay-hosted invoices for this booking. Event costs and food orders are billed on separate invoices with correct GST rates.
                   </Typography>
                   {invoiceError && (
                     <Typography variant="body2" color="error">{invoiceError}</Typography>
@@ -502,11 +580,11 @@ export default function AdminBookingDetails() {
                   <Button
                     variant="contained"
                     size="small"
-                    onClick={handleGenerateInvoice}
+                    onClick={() => handleGenerateInvoice(false)}
                     disabled={invoiceLoading}
                     sx={{ alignSelf: "flex-start", bgcolor: BRAND.purple, "&:hover": { bgcolor: "#3a0a72" } }}
                   >
-                    {invoiceLoading ? "Generating…" : "Generate Invoice"}
+                    {invoiceLoading ? "Generating…" : "Generate Invoices"}
                   </Button>
                 </Stack>
               )}

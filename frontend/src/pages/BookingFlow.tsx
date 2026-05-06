@@ -859,17 +859,26 @@ function PaymentStep({
   const venueSubtotal = priceBreakdown?.venue_subtotal ?? 0;
   const discountSavings = appliedPct > 0 ? Math.round(venueSubtotal * (appliedPct / 100) * 100) / 100 : 0;
   const discountedVenueSubtotal = venueSubtotal - discountSavings;
-  const nonVenueSubtotal =
+
+  // ── Event Invoice (18% GST): venue, add-ons, food court tables, extra rooms, favors
+  const eventBase =
+    discountedVenueSubtotal +
     (priceBreakdown?.addons_subtotal ?? 0) +
     (priceBreakdown?.foodcourt_subtotal ?? 0) +
     (priceBreakdown?.extra_rooms_subtotal ?? 0) +
-    (priceBreakdown?.favors_subtotal ?? 0) +
-    foodSubtotal;
-  const preGstSubtotal = discountedVenueSubtotal + nonVenueSubtotal;
-  const gstAmount = Math.round(preGstSubtotal * 0.18 * 100) / 100;
-  const total = Math.round((preGstSubtotal + gstAmount) * 100) / 100;
+    (priceBreakdown?.favors_subtotal ?? 0);
+  const eventGst = Math.round(eventBase * 0.18 * 100) / 100;
+  const eventTotal = Math.round((eventBase + eventGst) * 100) / 100;
+
+  // ── Food Invoice (5% GST): food menu selections
+  const foodCgst = Math.round(foodSubtotal * 0.025 * 100) / 100;
+  const foodSgst = Math.round(foodSubtotal * 0.025 * 100) / 100;
+  const foodTotal = Math.round((foodSubtotal + foodCgst + foodSgst) * 100) / 100;
+
+  // ── Combined totals
+  const total = Math.round((eventTotal + foodTotal) * 100) / 100;
   const reservationAdvance = total * 0.1;
-  const payableNow = Number.isFinite(reservationAdvance) ? reservationAdvance : 0;
+  const payableNow = Number.isFinite(reservationAdvance) ? Math.round(reservationAdvance * 100) / 100 : 0;
 
   return (
     <Grid container spacing={3}>
@@ -1007,6 +1016,19 @@ function PaymentStep({
               <Divider sx={{ mb: 1 }} />
             </>
           )}
+          {/* Event Invoice row */}
+          <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+            <Typography color="text.secondary" variant="body2">Event Invoice <span style={{ fontSize: "0.75em" }}>(18% GST)</span></Typography>
+            <Typography variant="body2" fontWeight={600}>₹{eventTotal.toLocaleString("en-IN")}</Typography>
+          </Box>
+          {/* Food Invoice row — shown only if food was ordered */}
+          {foodSubtotal > 0 && (
+            <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+              <Typography color="text.secondary" variant="body2">Food Invoice <span style={{ fontSize: "0.75em" }}>(5% GST)</span></Typography>
+              <Typography variant="body2" fontWeight={600}>₹{foodTotal.toLocaleString("en-IN")}</Typography>
+            </Box>
+          )}
+          <Divider sx={{ my: 1 }} />
           <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}>
             <Typography color="text.secondary">Order Total</Typography>
             <Typography fontWeight={700}>₹{total.toLocaleString("en-IN")}</Typography>
@@ -1163,18 +1185,24 @@ export default function BookingFlow() {
     setSubmittingBooking(true);
     setSubmitError("");
 
-    // Full order total with 18% GST (CGST 9% + SGST 9%, Tamil Nadu) — Razorpay shows Pay Full / Pay Minimum natively
+    // ── Split invoice totals ──────────────────────────────────────────────────
+    // Event Invoice (18% GST): venue, add-ons, food court tables, extra rooms, favors
     const venueSubtotal = priceBreakdown?.venue_subtotal ?? 0;
     const discountSavings = appliedDiscountPct > 0 ? Math.round(venueSubtotal * (appliedDiscountPct / 100) * 100) / 100 : 0;
-    const nonVenueSubtotal =
+    const eventBase =
+      (venueSubtotal - discountSavings) +
       (priceBreakdown?.addons_subtotal ?? 0) +
       (priceBreakdown?.foodcourt_subtotal ?? 0) +
       (priceBreakdown?.extra_rooms_subtotal ?? 0) +
-      (priceBreakdown?.favors_subtotal ?? 0) +
-      foodSubtotal;
-    const preGstSubtotal = (venueSubtotal - discountSavings) + nonVenueSubtotal;
-    const gstAmt = Math.round(preGstSubtotal * 0.18 * 100) / 100;
-    const total = Math.round((preGstSubtotal + gstAmt) * 100) / 100;
+      (priceBreakdown?.favors_subtotal ?? 0);
+    const eventGstAmt = Math.round(eventBase * 0.18 * 100) / 100;
+    const eventTotal = Math.round((eventBase + eventGstAmt) * 100) / 100;
+
+    // Food Invoice (5% GST): food menu selections
+    const foodGstAmt = Math.round(foodSubtotal * 0.05 * 100) / 100;
+    const foodInvTotal = Math.round((foodSubtotal + foodGstAmt) * 100) / 100;
+
+    const total = Math.round((eventTotal + foodInvTotal) * 100) / 100;
     const advance = Math.max(1, Math.round(total * 0.1 * 100) / 100);
     const fullAmount = Math.max(1, Math.round(total * 100) / 100);
 
@@ -1195,6 +1223,7 @@ export default function BookingFlow() {
           extra_rooms_count: bookingState.extraRoomsCount,
           foodcourt_tables_count: bookingState.foodcourtTablesCount,
           foodcourt_table_notes: bookingState.foodcourtTableNotes || undefined,
+          food_amount_pretax: foodSubtotal > 0 ? foodSubtotal : undefined,
           notes: Object.entries(bookingState.foodSelections)
             .filter(([, qty]) => qty > 0)
             .map(([key, qty]) => {

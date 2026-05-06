@@ -174,6 +174,7 @@ class BookingCreate(BaseModel):
     foodcourt_tables_count: int = 0
     foodcourt_table_notes: Optional[str] = None
     notes: Optional[str] = None
+    food_amount_pretax: float = 0.0   # Pre-tax food menu total — stored for 5% GST invoice
     line_items: List[BookingLineItemInput] = []
 
     @field_validator("duration_hours")
@@ -238,6 +239,9 @@ class BookingOut(BaseModel):
     price_breakdown: Optional[PriceBreakdown] = None
     razorpay_invoice_id: Optional[str] = None
     razorpay_invoice_short_url: Optional[str] = None
+    razorpay_food_invoice_id: Optional[str] = None
+    razorpay_food_invoice_short_url: Optional[str] = None
+    food_amount_pretax: Optional[float] = None
 
     model_config = {"from_attributes": True}
 
@@ -270,6 +274,8 @@ class BookingUpdate(BaseModel):
     alt_phone: Optional[str] = None
     # Name of whoever is making the change (guest name or logged-in user name)
     changed_by_name: Optional[str] = None
+    # Pre-tax food total — used to create the 5% GST food invoice
+    food_amount_pretax: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +372,25 @@ class RazorpayInvoiceOut(BaseModel):
     status: str
     amount: float  # INR
     booking_id: int
+
+
+class SplitInvoiceOut(BaseModel):
+    """Response for the /payments/invoice endpoint — contains both event and food invoices."""
+    booking_id: int
+
+    # Event invoice (18% GST) — always present
+    event_invoice_id: str
+    event_invoice_ref: str               # DZ/E/00001
+    event_invoice_short_url: str
+    event_invoice_status: str
+    event_invoice_amount: float          # INR (incl. GST)
+
+    # Food invoice (5% GST) — only present when food was ordered
+    food_invoice_id: Optional[str] = None
+    food_invoice_ref: Optional[str] = None   # DZ/F/00001
+    food_invoice_short_url: Optional[str] = None
+    food_invoice_status: Optional[str] = None
+    food_invoice_amount: Optional[float] = None  # INR (incl. GST)
 
 
 # ---------------------------------------------------------------------------

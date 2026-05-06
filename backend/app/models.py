@@ -156,9 +156,13 @@ class Booking(Base):
     # Food court
     foodcourt_tables_count = Column(Integer, default=0)
     foodcourt_table_notes = Column(Text)
-    # Razorpay invoice
-    razorpay_invoice_id = Column(String(100), nullable=True)
+    # Food menu selections (pre-tax total; stored separately for 5% GST invoice)
+    food_amount_pretax = Column(Float, default=0.0, nullable=True)
+    # Razorpay invoices — event (18% GST) and food (5% GST)
+    razorpay_invoice_id = Column(String(100), nullable=True)        # event invoice (legacy / default)
     razorpay_invoice_short_url = Column(String(500), nullable=True)
+    razorpay_food_invoice_id = Column(String(100), nullable=True)
+    razorpay_food_invoice_short_url = Column(String(500), nullable=True)
 
     user = relationship("User", back_populates="bookings")
     venue = relationship("Venue", back_populates="bookings")
