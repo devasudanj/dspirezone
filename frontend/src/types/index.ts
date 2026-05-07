@@ -107,6 +107,8 @@ export interface Booking {
   razorpay_food_invoice_id?: string;
   razorpay_food_invoice_short_url?: string;
   food_amount_pretax?: number;
+  discount_code?: string;
+  discount_pct?: number;
 }
 
 export interface BookingLineItemInput {
@@ -195,6 +197,8 @@ export interface UpdateBookingPayload {
   alt_email?: string;
   alt_phone?: string;
   changed_by_name?: string;
+  food_amount_pretax?: number;
+  discount_code?: string;  // empty string = remove discount, value = apply new code
 }
 
 export interface WhatsIncluded {

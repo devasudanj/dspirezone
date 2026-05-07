@@ -108,6 +108,8 @@ interface ModifyState {
   contactEmail: string;
   contactPhone: string;
   notes: string;
+  discountCode: string;
+  discountPct: number;
 }
 
 function buildStateFromBooking(booking: BookingWithPayments, venueMinHours: number): ModifyState {
@@ -144,6 +146,8 @@ function buildStateFromBooking(booking: BookingWithPayments, venueMinHours: numb
     contactEmail: booking.contact_email ?? "",
     contactPhone: booking.contact_phone ?? "",
     notes: booking.notes ?? "",
+    discountCode: booking.discount_code ?? "",
+    discountPct: booking.discount_pct ?? 0,
   };
 }
 
@@ -181,6 +185,13 @@ export default function ModifyBookingFlow() {
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceData, setInvoiceData] = useState<SplitInvoiceOut | null>(null);
   const [invoiceError, setInvoiceError] = useState("");
+
+  // Discount code
+  const [discountInput, setDiscountInput] = useState("");
+  const [discountMsg, setDiscountMsg] = useState("");
+  const [discountStatus, setDiscountStatus] = useState<"" | "success" | "error">("" );
+  const [applyingDiscount, setApplyingDiscount] = useState(false);
+  const [changingDiscount, setChangingDiscount] = useState(false);
 
   const patchState = (patch: Partial<ModifyState>) =>
     setState((prev) => prev ? { ...prev, ...patch } : null);
@@ -304,10 +315,13 @@ export default function ModifyBookingFlow() {
   // When venue/duration/addons changed, `priceBreakdown` holds the fresh event base price.
   // When only food changed (no priceBreakdown), compute delta against the saved food amount.
   const savedFoodPretax = booking?.food_amount_pretax ?? 0;
+  // Discount applies to venue subtotal only (same logic as BookingFlow)
+  const venueSubtotalForDiscount = priceBreakdown?.venue_subtotal ?? 0;
+  const discountSaving = (state?.discountPct ?? 0) > 0 && priceBreakdown
+    ? Math.round(venueSubtotalForDiscount * ((state?.discountPct ?? 0) / 100) * 100) / 100
+    : 0;
   const newTotal = priceBreakdown
-    // Venue details changed: recompute everything from scratch
-    ? Math.round((priceBreakdown.total * 1.18 + foodSubtotal * 1.05) * 100) / 100
-    // No venue change: start from DB total, adjust only for any food delta
+    ? Math.round(((priceBreakdown.total - discountSaving) * 1.18 + foodSubtotal * 1.05) * 100) / 100
     : Math.round(((booking?.total_price ?? 0) + (foodSubtotal - savedFoodPretax) * 1.05) * 100) / 100;
   const totalPaid = booking?.total_paid ?? 0;
   const remainingDue = Math.max(0, newTotal - totalPaid);
@@ -357,9 +371,30 @@ export default function ModifyBookingFlow() {
         contact_email: state.contactEmail || undefined,
         contact_phone: state.contactPhone || undefined,
         changed_by_name: state.contactName || "Guest",
+        discount_code: state.discountCode || "",  // empty string removes discount
       });
-      setBooking(res.data);
+      const savedBooking = res.data;
+      setBooking(savedBooking);
       setSaveSuccess(true);
+
+      // Refresh invoice display state — backend has already regenerated the Razorpay invoice
+      // as part of the save, so just fetch the current state (no force_regenerate needed).
+      if (savedBooking.razorpay_invoice_id) {
+        setInvoiceLoading(true);
+        setInvoiceError("");
+        try {
+          const invRes = await api.post<SplitInvoiceOut>("/payments/invoice", {
+            booking_id: savedBooking.id,
+            confirmation_code: code.toUpperCase(),
+            force_regenerate: false,
+          });
+          setInvoiceData(invRes.data);
+        } catch {
+          // Non-fatal: invoice display may be slightly stale; user can refresh manually
+        } finally {
+          setInvoiceLoading(false);
+        }
+      }
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to save changes");
     } finally {
@@ -460,6 +495,42 @@ export default function ModifyBookingFlow() {
     }
   };
 
+  const applyDiscountCode = async (code: string) => {
+    if (!code.trim()) return;
+    setApplyingDiscount(true);
+    setDiscountMsg("");
+    setDiscountStatus("");
+    try {
+      const res = await api.post<{ valid: boolean; discount_pct: number; message: string }>(
+        "/discounts/validate",
+        { code: code.trim().toUpperCase(), booking_date: state?.date?.format("YYYY-MM-DD") },
+      );
+      if (res.data.valid) {
+        patchState({ discountCode: code.trim().toUpperCase(), discountPct: res.data.discount_pct });
+        setDiscountInput("");
+        setChangingDiscount(false);
+        setDiscountStatus("success");
+        setDiscountMsg(res.data.message || `${res.data.discount_pct}% off venue cost applied!`);
+      } else {
+        setDiscountStatus("error");
+        setDiscountMsg(res.data.message || "Invalid or expired discount code.");
+      }
+    } catch {
+      setDiscountStatus("error");
+      setDiscountMsg("Could not validate discount code. Please try again.");
+    } finally {
+      setApplyingDiscount(false);
+    }
+  };
+
+  const removeDiscount = () => {
+    patchState({ discountCode: "", discountPct: 0 });
+    setDiscountInput("");
+    setDiscountMsg("");
+    setDiscountStatus("");
+    setChangingDiscount(false);
+  };
+
   const handleRazorpayPayment = async () => {
     const amount = parseFloat(payAmount);
     if (!amount || amount <= 0) { setPayError("Enter a valid payment amount."); return; }
@@ -506,6 +577,7 @@ export default function ModifyBookingFlow() {
         {saveSuccess && (
           <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSaveSuccess(false)}>
             <strong>Changes saved successfully!</strong> Your booking has been updated.
+            {booking?.razorpay_invoice_id && " A confirmation email with your updated invoice link has been sent."}
           </Alert>
         )}
         {saveError && (
@@ -769,6 +841,78 @@ export default function ModifyBookingFlow() {
           </AccordionDetails>
         </Accordion>
 
+        {/* ── Discount Code ─────────────────────────────────────── */}
+        <Accordion {...accordionPanel("discount")}>
+          <AccordionSummary expandIcon={<ExpandMore />}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flex: 1 }}>
+              <Typography fontWeight={700}>🏷️ Discount Code</Typography>
+              {state.discountCode && (
+                <Chip
+                  size="small"
+                  label={`${state.discountCode} – ${state.discountPct}% off`}
+                  color="success"
+                  variant="outlined"
+                />
+              )}
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            {state.discountCode && !changingDiscount ? (
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                <Alert severity="success" icon={false}>
+                  <strong>Discount applied:</strong> {state.discountCode} – {state.discountPct}% off venue cost
+                </Alert>
+                <Box sx={{ display: "flex", gap: 1 }}>
+                  <Button size="small" variant="outlined" onClick={() => { setChangingDiscount(true); setDiscountInput(state.discountCode); }}>
+                    Change Code
+                  </Button>
+                  <Button size="small" variant="outlined" color="error" onClick={removeDiscount}>
+                    Remove Discount
+                  </Button>
+                </Box>
+              </Box>
+            ) : (
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                {!state.discountCode && (
+                  <Typography variant="body2" color="text.secondary">
+                    Have a discount code? Enter it below to apply a discount to your venue cost.
+                  </Typography>
+                )}
+                <Box sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
+                  <TextField
+                    label="Discount Code"
+                    value={discountInput}
+                    onChange={(e) => setDiscountInput(e.target.value.toUpperCase())}
+                    size="small"
+                    sx={{ flex: 1 }}
+                    inputProps={{ style: { textTransform: "uppercase" } }}
+                    onKeyDown={(e) => { if (e.key === "Enter") void applyDiscountCode(discountInput); }}
+                  />
+                  <Button
+                    variant="contained"
+                    size="medium"
+                    onClick={() => void applyDiscountCode(discountInput)}
+                    disabled={applyingDiscount || !discountInput.trim()}
+                    sx={{ height: 40, whiteSpace: "nowrap" }}
+                  >
+                    {applyingDiscount ? <CircularProgress size={16} color="inherit" /> : "Apply"}
+                  </Button>
+                  {changingDiscount && (
+                    <Button size="medium" variant="text" sx={{ height: 40 }} onClick={() => { setChangingDiscount(false); setDiscountInput(""); setDiscountMsg(""); setDiscountStatus(""); }}>
+                      Cancel
+                    </Button>
+                  )}
+                </Box>
+                {discountMsg && (
+                  <Alert severity={discountStatus === "success" ? "success" : discountStatus === "error" ? "error" : "info"} sx={{ py: 0.5 }}>
+                    {discountMsg}
+                  </Alert>
+                )}
+              </Box>
+            )}
+          </AccordionDetails>
+        </Accordion>
+
         {/* ── Contact Details ────────────────────────────────────── */}
         <Accordion {...accordionPanel("contact")}>
           <AccordionSummary expandIcon={<ExpandMore />}>
@@ -809,6 +953,12 @@ export default function ModifyBookingFlow() {
                   <Typography color="text.secondary">Updated Total (excl. food)</Typography>
                   <Typography fontWeight={600}>₹{priceBreakdown.total.toLocaleString("en-IN")}</Typography>
                 </Box>
+                {discountSaving > 0 && (
+                  <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                    <Typography color="success.main">🏷️ Discount ({state.discountCode} – {state.discountPct}% off venue)</Typography>
+                    <Typography color="success.main" fontWeight={600}>-₹{Math.round(discountSaving * 1.18).toLocaleString("en-IN")}</Typography>
+                  </Box>
+                )}
                 {foodSubtotal > 0 && (
                   <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                     <Typography color="text.secondary">Food Subtotal</Typography>
@@ -816,6 +966,11 @@ export default function ModifyBookingFlow() {
                   </Box>
                 )}
               </>
+            ) : state.discountCode && booking?.discount_code ? (
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography color="success.main">🏷️ {booking.discount_code} ({booking.discount_pct ?? 0}% off)</Typography>
+                <Typography color="success.main" fontWeight={600}>applied</Typography>
+              </Box>
             ) : null}
             <Divider />
             <Box sx={{ display: "flex", justifyContent: "space-between" }}>

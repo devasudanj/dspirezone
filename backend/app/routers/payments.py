@@ -262,6 +262,199 @@ class _InvoiceRequest(BaseModel):
     force_regenerate: bool = False  # cancel & recreate invoices with current booking data
 
 
+# ---------------------------------------------------------------------------
+# Shared helper — usable from bookings router without HTTP self-call
+# ---------------------------------------------------------------------------
+
+def regenerate_booking_invoices(booking: Booking, db: Session) -> tuple[str | None, str | None]:
+    """
+    Cancel any existing Razorpay invoices for *booking*, recreate them from
+    the current booking data, persist the new IDs/URLs, and return
+    (event_short_url, food_short_url).
+
+    Raises on Razorpay HTTP errors so the caller can decide whether to abort
+    or swallow and continue.  The caller is responsible for db.commit() after
+    this returns (this function commits internally at each safe point).
+    """
+    # --- Cancel existing invoices ---
+    for inv_id in [booking.razorpay_invoice_id, booking.razorpay_food_invoice_id]:
+        if not inv_id:
+            continue
+        try:
+            cancelled = rzp.cancel_invoice(inv_id)
+            logger.info(
+                "Cancelled invoice %s status=%s for booking %s",
+                inv_id, cancelled.get("status"), booking.id,
+            )
+        except Exception as exc:
+            logger.warning("Could not cancel invoice %s: %s", inv_id, exc)
+
+    booking.razorpay_invoice_id = None
+    booking.razorpay_invoice_short_url = None
+    booking.razorpay_food_invoice_id = None
+    booking.razorpay_food_invoice_short_url = None
+    db.commit()
+
+    # --- Build EVENT line items (venue, add-ons, favors — 18% GST) ---
+    customer_name = (booking.contact_name or "Guest").strip() or "Guest"
+    inv_seq = f"{booking.id:05d}"
+    event_inv_ref = f"DZ/E/{inv_seq}"
+    food_inv_ref = f"DZ/F/{inv_seq}"
+
+    event_items: list[dict] = []
+    duration_hours: float = 0.0
+
+    venue = booking.venue
+    if booking.start_time and booking.end_time and venue:
+        start_mins = booking.start_time.hour * 60 + booking.start_time.minute
+        end_mins = booking.end_time.hour * 60 + booking.end_time.minute
+        duration_hours = (end_mins - start_mins) / 60.0
+        if duration_hours > 0:
+            hourly_rate = venue.base_hourly_rate or 1500.0
+            event_items.append({
+                "name": f"Event Space \u2013 {duration_hours:g} hr \u00d7 \u20b9{hourly_rate:,.0f}/hr",
+                "amount": int(round(hourly_rate * 100)),
+                "quantity": int(duration_hours) if duration_hours == int(duration_hours) else duration_hours,
+            })
+        if (booking.extra_rooms_count or 0) > 0 and venue.extra_room_hourly_rate:
+            extra_rate = venue.extra_room_hourly_rate
+            qty = booking.extra_rooms_count
+            event_items.append({
+                "name": f"Extra Room \u00d7 {qty} \u2013 {duration_hours:g} hr @ \u20b9{extra_rate:,.0f}/hr each",
+                "amount": int(round(extra_rate * duration_hours * 100)),
+                "quantity": qty,
+            })
+        if (booking.foodcourt_tables_count or 0) > 0 and venue.foodcourt_table_rate:
+            fc_rate = venue.foodcourt_table_rate
+            fc_qty = booking.foodcourt_tables_count
+            event_items.append({
+                "name": f"Food Court Table \u00d7 {fc_qty}",
+                "amount": int(round(fc_rate * 100)),
+                "quantity": fc_qty,
+            })
+
+    if booking.line_items:
+        for li in booking.line_items:
+            name = getattr(li, "item_name", None) or f"Item #{getattr(li, 'catalog_item_id', '?')}"
+            price_type = getattr(li, "price_type", None) or "fixed"
+            unit_price = getattr(li, "unit_price", None) or 0
+            quantity = getattr(li, "quantity", 1) or 1
+            line_total = getattr(li, "line_total", None)
+            total_to_use = line_total if (line_total is not None and line_total > 0) else unit_price * quantity
+            amount_paise = int(round(total_to_use * 100))
+            if price_type == "per_hour" and duration_hours > 0:
+                label = f"{name} ({duration_hours:g} hr \u00d7 \u20b9{unit_price:,.0f}/hr)"
+            elif price_type == "per_unit" and quantity != 1:
+                label = f"{name} \u00d7 {int(quantity)}"
+            else:
+                label = name
+            if amount_paise > 0:
+                event_items.append({"name": label, "amount": amount_paise, "quantity": 1})
+
+    # Apply discount to the first (venue) line item
+    discount_pct = getattr(booking, "discount_pct", None) or 0.0
+    discount_code = getattr(booking, "discount_code", None)
+    if discount_pct > 0 and discount_code and event_items:
+        vi = event_items[0]
+        discount_factor = 1.0 - (discount_pct / 100.0)
+        vi["name"] = f"{vi['name']} | Discount: {discount_code} ({discount_pct:.0f}% off)"
+        vi["amount"] = max(1, int(round(vi["amount"] * discount_factor)))
+
+    event_subtotal_inr = sum((item["amount"] / 100) * item["quantity"] for item in event_items)
+    event_cgst = round(event_subtotal_inr * 0.09, 2)
+    event_sgst = round(event_subtotal_inr * 0.09, 2)
+
+    event_line_items = list(event_items)
+    if event_cgst > 0:
+        event_line_items.append({"name": "CGST @ 9% (Tamil Nadu) \u2013 Event Services", "amount": int(round(event_cgst * 100)), "quantity": 1})
+    if event_sgst > 0:
+        event_line_items.append({"name": "SGST @ 9% (Tamil Nadu) \u2013 Event Services", "amount": int(round(event_sgst * 100)), "quantity": 1})
+
+    if not event_line_items:
+        food_pretax_fb = booking.food_amount_pretax or 0.0
+        food_with_gst_fb = round(food_pretax_fb * 1.05, 2)
+        event_amount_fb = max(0.0, booking.total_price - food_with_gst_fb)
+        event_line_items = [{"name": f"Booking {booking.confirmation_code}", "amount": int(round(event_amount_fb * 100)), "quantity": 1}]
+
+    event_total_paid = sum(p.amount for p in booking.payments if p.status == PaymentStatus.completed)
+    event_balance_due = max(0.0, booking.total_price - event_total_paid)
+
+    event_description = (
+        f"{event_inv_ref} | Booking {booking.confirmation_code} \u2013 {customer_name} | "
+        f"Event Invoice (18% GST) | "
+        f"Order Total: INR {booking.total_price:,.2f} | "
+        f"Advance Paid: INR {event_total_paid:,.2f} | "
+        f"Balance Due: INR {event_balance_due:,.2f}"
+    )
+
+    # --- Create + issue EVENT invoice ---
+    inv = rzp.create_invoice(
+        customer_name=customer_name,
+        customer_email=booking.contact_email or "",
+        customer_phone=booking.contact_phone or None,
+        description=event_description,
+        line_items=event_line_items,
+        currency=settings.RAZORPAY_CURRENCY,
+        notes={
+            "Invoice_No": event_inv_ref,
+            "Invoice_Type": "Event (18% GST)",
+            "Order_Total": f"INR {booking.total_price:,.2f}",
+            "Amount_Paid": f"INR {event_total_paid:,.2f}",
+            "Balance_Due": f"INR {event_balance_due:,.2f}",
+            "Confirmation": booking.confirmation_code,
+        },
+    )
+    booking.razorpay_invoice_id = inv["id"]
+    booking.razorpay_invoice_short_url = inv.get("short_url", "")
+    db.commit()
+
+    inv = rzp.issue_invoice(inv["id"])
+    booking.razorpay_invoice_short_url = inv.get("short_url", "") or booking.razorpay_invoice_short_url
+    event_short_url = booking.razorpay_invoice_short_url
+
+    # --- Create + issue FOOD invoice if applicable ---
+    food_short_url: str | None = None
+    food_pretax = booking.food_amount_pretax or 0.0
+    if food_pretax > 0:
+        food_cgst = round(food_pretax * 0.025, 2)
+        food_sgst = round(food_pretax * 0.025, 2)
+        food_total = round(food_pretax + food_cgst + food_sgst, 2)
+        try:
+            food_inv = rzp.create_invoice(
+                customer_name=customer_name,
+                customer_email=booking.contact_email or "",
+                customer_phone=booking.contact_phone or None,
+                description=(
+                    f"{food_inv_ref} | Booking {booking.confirmation_code} \u2013 {customer_name} | "
+                    f"Food & Beverages Invoice (5% GST) | "
+                    f"Food Total (incl. GST): INR {food_total:,.2f}"
+                ),
+                line_items=[
+                    {"name": "Food & Beverages Selection", "amount": int(round(food_pretax * 100)), "quantity": 1},
+                    {"name": "CGST @ 2.5% (Tamil Nadu) \u2013 Food", "amount": int(round(food_cgst * 100)), "quantity": 1},
+                    {"name": "SGST @ 2.5% (Tamil Nadu) \u2013 Food", "amount": int(round(food_sgst * 100)), "quantity": 1},
+                ],
+                currency=settings.RAZORPAY_CURRENCY,
+                notes={
+                    "Invoice_No": food_inv_ref,
+                    "Invoice_Type": "Food & Beverages (5% GST)",
+                    "Food_Total": f"INR {food_total:,.2f}",
+                    "Confirmation": booking.confirmation_code,
+                },
+            )
+            food_inv = rzp.issue_invoice(food_inv["id"])
+            booking.razorpay_food_invoice_id = food_inv["id"]
+            booking.razorpay_food_invoice_short_url = food_inv.get("short_url", "")
+            food_short_url = booking.razorpay_food_invoice_short_url
+            logger.info("Food invoice created+issued: %s  booking=%s", food_inv["id"], booking.id)
+        except Exception as exc:
+            logger.error("Food invoice creation failed (non-fatal): %s", exc)
+
+    db.commit()
+    logger.info("Event invoice created+issued: %s  booking=%s  url=%s", inv["id"], booking.id, event_short_url)
+    return (event_short_url or None, food_short_url)
+
+
 @router.post("/invoice", response_model=SplitInvoiceOut)
 def generate_invoice(
     payload: _InvoiceRequest,
@@ -381,294 +574,43 @@ def generate_invoice(
             food_invoice_amount=food_amount,
         )
 
-    # --- force_regenerate: cancel existing invoices and recreate with current booking data ---
-    if booking.razorpay_invoice_id and payload.force_regenerate:
-        for inv_id in [booking.razorpay_invoice_id, booking.razorpay_food_invoice_id]:
-            if not inv_id:
-                continue
-            try:
-                cancelled = rzp.cancel_invoice(inv_id)
-                logger.info("Cancelled invoice %s status=%s for regeneration (booking %s)", inv_id, cancelled.get("status"), booking.id)
-            except Exception as exc:
-                logger.warning("Could not cancel invoice %s: %s", inv_id, exc)
-        booking.razorpay_invoice_id = None
-        booking.razorpay_invoice_short_url = None
-        booking.razorpay_food_invoice_id = None
-        booking.razorpay_food_invoice_short_url = None
-        db.commit()
-        logger.info("Cleared invoice IDs for booking %s – will regenerate", booking.id)
+    # --- force_regenerate or first-time creation: use the shared helper ---
+    try:
+        _event_url, _food_url = regenerate_booking_invoices(booking, db)
+    except httpx.HTTPStatusError as exc:
+        logger.error("Razorpay invoice error: %s – %s", exc.response.status_code, exc.response.text)
+        raise HTTPException(status_code=502, detail=f"Invoice creation failed: {exc.response.text}")
+    except Exception as exc:
+        logger.error("Razorpay invoice creation failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Invoice creation failed: {exc}")
 
-    # --- Build EVENT line_items from booking (venue, add-ons, favors — 18% GST) ---
-    customer_name = (booking.contact_name or "Guest").strip() or "Guest"
-
-    event_items: list[dict] = []   # line items for event invoice (pre-GST amounts in paise)
-    duration_hours: float = 0.0
-
-    # 1. Event space – hourly charge
-    venue = booking.venue
-    if booking.start_time and booking.end_time and venue:
-        start_mins = booking.start_time.hour * 60 + booking.start_time.minute
-        end_mins   = booking.end_time.hour   * 60 + booking.end_time.minute
-        duration_hours = (end_mins - start_mins) / 60.0
-        if duration_hours > 0:
-            hourly_rate = venue.base_hourly_rate or 1500.0
-            event_items.append({
-                "name": f"Event Space – {duration_hours:g} hr × ₹{hourly_rate:,.0f}/hr",
-                "amount": int(round(hourly_rate * 100)),   # unit price in paise
-                "quantity": int(duration_hours) if duration_hours == int(duration_hours) else duration_hours,
-            })
-
-        # 2. Extra rooms
-        if (booking.extra_rooms_count or 0) > 0 and venue.extra_room_hourly_rate:
-            extra_rate = venue.extra_room_hourly_rate
-            qty = booking.extra_rooms_count
-            event_items.append({
-                "name": f"Extra Room × {qty} – {duration_hours:g} hr @ ₹{extra_rate:,.0f}/hr each",
-                "amount": int(round(extra_rate * duration_hours * 100)),
-                "quantity": qty,
-            })
-
-        # 3. Food court tables
-        if (booking.foodcourt_tables_count or 0) > 0 and venue.foodcourt_table_rate:
-            fc_rate = venue.foodcourt_table_rate
-            fc_qty  = booking.foodcourt_tables_count
-            event_items.append({
-                "name": f"Food Court Table × {fc_qty}",
-                "amount": int(round(fc_rate * 100)),
-                "quantity": fc_qty,
-            })
-
-    # 4. Catalog add-ons / favors
-    if booking.line_items:
-        for li in booking.line_items:
-            name = getattr(li, "item_name", None) or f"Item #{getattr(li, 'catalog_item_id', '?')}"
-            price_type = getattr(li, "price_type", None) or "fixed"
-            unit_price = getattr(li, "unit_price", None) or 0
-            quantity = getattr(li, "quantity", 1) or 1
-            line_total = getattr(li, "line_total", None)
-
-            if line_total is not None and line_total > 0:
-                total_to_use = line_total
-            else:
-                total_to_use = unit_price * quantity
-
-            amount_paise = int(round(total_to_use * 100))
-
-            if price_type == "per_hour" and duration_hours > 0:
-                label = f"{name} ({duration_hours:g} hr × ₹{unit_price:,.0f}/hr)"
-            elif price_type == "per_unit" and quantity != 1:
-                label = f"{name} × {int(quantity)}"
-            else:
-                label = name
-
-            if amount_paise > 0:
-                event_items.append({
-                    "name": label,
-                    "amount": amount_paise,
-                    "quantity": 1,
-                })
-
-    # Compute event subtotal from actual line items then add GST at 18%
-    event_subtotal_inr = sum(
-        (item["amount"] / 100) * item["quantity"] for item in event_items
-    )
-    event_cgst = round(event_subtotal_inr * 0.09, 2)
-    event_sgst = round(event_subtotal_inr * 0.09, 2)
-
-    event_line_items = list(event_items)
-    if event_cgst > 0:
-        event_line_items.append({
-            "name": "CGST @ 9% (Tamil Nadu) – Event Services",
-            "amount": int(round(event_cgst * 100)),
-            "quantity": 1,
-        })
-    if event_sgst > 0:
-        event_line_items.append({
-            "name": "SGST @ 9% (Tamil Nadu) – Event Services",
-            "amount": int(round(event_sgst * 100)),
-            "quantity": 1,
-        })
-
-    if not event_line_items:
-        # Fallback: single line item for the event portion of total_price
-        food_pretax = booking.food_amount_pretax or 0.0
-        food_with_gst = round(food_pretax * 1.05, 2)
-        event_amount = max(0.0, booking.total_price - food_with_gst)
-        event_line_items = [{
-            "name": f"Booking {booking.confirmation_code}",
-            "amount": int(round(event_amount * 100)),
-            "quantity": 1,
-        }]
-
-    # Invoice reference numbers: DZ/E/XXXXX and DZ/F/XXXXX (shared numeric part = booking.id)
+    db.refresh(booking)
     inv_seq = f"{booking.id:05d}"
     event_inv_ref = f"DZ/E/{inv_seq}"
-
-    event_total_paid = sum(
-        p.amount for p in booking.payments if p.status == PaymentStatus.completed
-    )
-    event_balance_due = max(0.0, booking.total_price - event_total_paid)
-
-    event_description = (
-        f"{event_inv_ref} | Booking {booking.confirmation_code} – {customer_name} | "
-        f"Event Invoice (18% GST) | "
-        f"Order Total: INR {booking.total_price:,.2f} | "
-        f"Advance Paid: INR {event_total_paid:,.2f} | "
-        f"Balance Due: INR {event_balance_due:,.2f}"
-    )
-
-    # Razorpay line_items don't support negative amounts, so we cannot show a
-    # deduction inline.  When an advance has been paid, collapse to a single
-    # "Balance Due" line item so the invoice total = amount the customer still owes.
-    # When nothing has been paid the full itemised breakdown is used.
-    # When fully paid the full itemised list serves as a receipt (balance = 0).
-    if event_total_paid > 0 and event_balance_due > 0:
-        invoice_line_items = [
-            {
-                "name": (
-                    f"Balance Due – Event Services (18% GST incl.) | "
-                    f"Full value: INR {booking.total_price:,.2f} | "
-                    f"Advance paid: INR {event_total_paid:,.2f}"
-                ),
-                "amount": int(round(event_balance_due * 100)),
-                "quantity": 1,
-            }
-        ]
-    else:
-        # No advance paid → full itemised breakdown; or fully paid → receipt
-        invoice_line_items = event_line_items
-
-    try:
-        inv = rzp.create_invoice(
-            customer_name=customer_name,
-            customer_email=booking.contact_email or "",
-            customer_phone=booking.contact_phone or None,
-            description=event_description,
-            line_items=invoice_line_items,
-            currency=settings.RAZORPAY_CURRENCY,
-            notes={
-                "Invoice_No": event_inv_ref,
-                "Invoice_Type": "Event (18% GST)",
-                "Order_Total": f"INR {booking.total_price:,.2f}",
-                "Amount_Paid": f"INR {event_total_paid:,.2f}",
-                "Balance_Due": f"INR {event_balance_due:,.2f}",
-                "Confirmation": booking.confirmation_code,
-            },
-        )
-    except httpx.HTTPStatusError as exc:
-        logger.error("Razorpay create_invoice HTTP error: %s – %s", exc.response.status_code, exc.response.text)
-        raise HTTPException(status_code=502, detail=f"Event invoice creation failed: {exc.response.text}")
-    except Exception as exc:
-        logger.error("Razorpay create_invoice failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Event invoice creation failed: {exc}")
-
-    # Save draft invoice ID immediately so we don't lose it if issuing fails
-    booking.razorpay_invoice_id = inv["id"]
-    booking.razorpay_invoice_short_url = inv.get("short_url", "")
-    db.commit()
-
-    # Issue the invoice so it gets a short_url (draft invoices have no link)
-    try:
-        inv = rzp.issue_invoice(inv["id"])
-        booking.razorpay_invoice_short_url = inv.get("short_url", "")
-    except httpx.HTTPStatusError as exc:
-        logger.error("Razorpay issue_invoice HTTP error: %s – %s", exc.response.status_code, exc.response.text)
-        raise HTTPException(status_code=502, detail=f"Event invoice created but could not be issued: {exc.response.text}")
-    except Exception as exc:
-        logger.error("Razorpay issue_invoice failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Event invoice created but could not be issued: {exc}")
-
-    # --- Create FOOD invoice if food items were ordered (5% GST) ---
-    food_pretax = booking.food_amount_pretax or 0.0
-    if food_pretax > 0 and not booking.razorpay_food_invoice_id:
-        food_cgst = round(food_pretax * 0.025, 2)
-        food_sgst = round(food_pretax * 0.025, 2)
-        food_inv_ref = f"DZ/F/{inv_seq}"
-
-        food_line_items = [
-            {
-                "name": "Food & Beverages Selection",
-                "amount": int(round(food_pretax * 100)),
-                "quantity": 1,
-            },
-            {
-                "name": "CGST @ 2.5% (Tamil Nadu) – Food",
-                "amount": int(round(food_cgst * 100)),
-                "quantity": 1,
-            },
-            {
-                "name": "SGST @ 2.5% (Tamil Nadu) – Food",
-                "amount": int(round(food_sgst * 100)),
-                "quantity": 1,
-            },
-        ]
-
-        food_total = round(food_pretax + food_cgst + food_sgst, 2)
-
-        try:
-            food_inv = rzp.create_invoice(
-                customer_name=customer_name,
-                customer_email=booking.contact_email or "",
-                customer_phone=booking.contact_phone or None,
-                description=(
-                    f"{food_inv_ref} | Booking {booking.confirmation_code} – {customer_name} | "
-                    f"Food & Beverages Invoice (5% GST) | "
-                    f"Food Total (incl. GST): INR {food_total:,.2f}"
-                ),
-                line_items=food_line_items,
-                currency=settings.RAZORPAY_CURRENCY,
-                notes={
-                    "Invoice_No": food_inv_ref,
-                    "Invoice_Type": "Food & Beverages (5% GST)",
-                    "Food_Total": f"INR {food_total:,.2f}",
-                    "Confirmation": booking.confirmation_code,
-                },
-            )
-            # Issue the invoice so it gets a short_url
-            food_inv = rzp.issue_invoice(food_inv["id"])
-            booking.razorpay_food_invoice_id = food_inv["id"]
-            booking.razorpay_food_invoice_short_url = food_inv.get("short_url", "")
-            logger.info(
-                "Food invoice created+issued: %s  booking=%s  short_url=%s",
-                food_inv["id"], booking.id, food_inv.get("short_url"),
-            )
-        except Exception as exc:
-            # Food invoice failure is non-fatal — event invoice was already created
-            logger.error("Razorpay food invoice creation failed: %s", exc)
-
-    db.commit()
-
-    logger.info(
-        "Event invoice created+issued: %s  booking=%s  short_url=%s",
-        inv["id"], booking.id, inv.get("short_url"),
-    )
-
-    inv_seq = f"{booking.id:05d}"
     food_inv_ref_val = f"DZ/F/{inv_seq}"
 
-    food_pretax2 = booking.food_amount_pretax or 0.0
-    food_id2 = booking.razorpay_food_invoice_id
-    food_url2 = booking.razorpay_food_invoice_short_url or ""
-    food_status2: Optional[str] = None
-    food_amount2: Optional[float] = None
-    if food_pretax2 > 0 and food_id2:
-        food_cgst2 = round(food_pretax2 * 0.025, 2)
-        food_sgst2 = round(food_pretax2 * 0.025, 2)
-        food_amount2 = round(food_pretax2 + food_cgst2 + food_sgst2, 2)
-        food_status2 = inv.get("status", "issued")  # same status lifecycle as event
+    food_pretax = booking.food_amount_pretax or 0.0
+    food_id = booking.razorpay_food_invoice_id
+    food_url = booking.razorpay_food_invoice_short_url or ""
+    food_status: Optional[str] = "issued" if food_id else None
+    food_amount: Optional[float] = None
+    if food_pretax > 0 and food_id:
+        food_cgst = round(food_pretax * 0.025, 2)
+        food_sgst = round(food_pretax * 0.025, 2)
+        food_amount = round(food_pretax + food_cgst + food_sgst, 2)
 
     return SplitInvoiceOut(
         booking_id=booking.id,
-        event_invoice_id=inv["id"],
+        event_invoice_id=booking.razorpay_invoice_id or "",
         event_invoice_ref=event_inv_ref,
-        event_invoice_short_url=inv.get("short_url", ""),
-        event_invoice_status=inv.get("status", "draft"),
-        event_invoice_amount=(inv.get("amount", 0) or 0) / 100,
-        food_invoice_id=food_id2 or None,
-        food_invoice_ref=food_inv_ref_val if food_id2 else None,
-        food_invoice_short_url=food_url2 or None,
-        food_invoice_status=food_status2,
-        food_invoice_amount=food_amount2,
+        event_invoice_short_url=booking.razorpay_invoice_short_url or "",
+        event_invoice_status="issued",
+        event_invoice_amount=booking.total_price,
+        food_invoice_id=food_id or None,
+        food_invoice_ref=food_inv_ref_val if food_id else None,
+        food_invoice_short_url=food_url or None,
+        food_invoice_status=food_status,
+        food_invoice_amount=food_amount,
     )
 
 

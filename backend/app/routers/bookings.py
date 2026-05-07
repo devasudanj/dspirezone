@@ -1,4 +1,5 @@
 import json
+import logging
 import secrets
 import string
 from datetime import datetime, timedelta
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import (
     Booking, BookingAuditLog, BookingLineItem, BookingStatus, CatalogItem,
-    Payment, User, UserRole, Venue, PriceType,
+    DiscountCode, Payment, User, UserRole, Venue, PriceType,
 )
 from ..schemas import (
     BookingCreate, BookingOut, BookingOutWithPayments, BookingUpdate,
@@ -23,10 +24,12 @@ from ..core.pricing import (
     calculate_booking_breakdown,
     calculate_line_item_total,
 )
-from ..core.email import send_booking_confirmation_emails
+from ..core.email import send_booking_confirmation_emails, send_booking_modification_email
 from ..core.security import get_password_hash
 from ..core.cal_com import create_cal_booking, get_cal_available_times
+from ..core.config import settings
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -242,7 +245,27 @@ def create_booking(
     # Food items are taxed at 5% GST (CGST 2.5% + SGST 2.5%) — tracked separately
     food_pretax = payload.food_amount_pretax or 0.0
     food_gst = round(food_pretax * 0.05, 2)
-    total_price = round(breakdown["total_with_gst"] + food_pretax + food_gst, 2)
+
+    # Apply discount code (venue subtotal only; validated from DB for security)
+    applied_discount_code: str | None = None
+    applied_discount_pct: float = 0.0
+    if payload.discount_code:
+        dc = (
+            db.query(DiscountCode)
+            .filter(
+                DiscountCode.code == payload.discount_code.strip().upper(),
+                DiscountCode.active.is_(True),
+            )
+            .first()
+        )
+        if dc:
+            applied_discount_code = dc.code
+            applied_discount_pct = dc.discount_pct
+
+    discount_saving_pretax = round(breakdown["venue_subtotal"] * applied_discount_pct / 100, 2)
+    discounted_event_pretax = breakdown["total"] - discount_saving_pretax
+    discounted_event_with_gst = round(discounted_event_pretax * 1.18, 2)
+    total_price = round(discounted_event_with_gst + food_pretax + food_gst, 2)
 
     booking = Booking(
         venue_id=venue.id,
@@ -262,6 +285,8 @@ def create_booking(
         extra_rooms_count=payload.extra_rooms_count,
         foodcourt_tables_count=payload.foodcourt_tables_count,
         foodcourt_table_notes=payload.foodcourt_table_notes,
+        discount_code=applied_discount_code,
+        discount_pct=applied_discount_pct if applied_discount_pct > 0 else None,
     )
     db.add(booking)
     db.flush()  # get booking.id before adding line items
@@ -416,6 +441,7 @@ def get_booking_by_code(
 def update_booking(
     booking_id: int,
     payload: BookingUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_user),
 ):
@@ -533,7 +559,31 @@ def update_booking(
     if new_foodcourt_tables != booking.foodcourt_tables_count:
         changes.append(f"Food court tables: {booking.foodcourt_tables_count} → {new_foodcourt_tables}")
     old_total = booking.total_price
-    new_total = breakdown["total_with_gst"]
+
+    # Resolve discount for the updated booking
+    upd_discount_code = booking.discount_code  # default: preserve existing
+    upd_discount_pct = booking.discount_pct or 0.0
+    if payload.discount_code is not None:
+        if payload.discount_code == "":
+            upd_discount_code = None
+            upd_discount_pct = 0.0
+        else:
+            dc = (
+                db.query(DiscountCode)
+                .filter(
+                    DiscountCode.code == payload.discount_code.strip().upper(),
+                    DiscountCode.active.is_(True),
+                )
+                .first()
+            )
+            if dc:
+                upd_discount_code = dc.code
+                upd_discount_pct = dc.discount_pct
+
+    upd_discount_saving = round(breakdown["venue_subtotal"] * upd_discount_pct / 100, 2)
+    upd_event_pretax = breakdown["total"] - upd_discount_saving
+    new_total = round(upd_event_pretax * 1.18, 2)
+
     new_food_pretax_for_log = (
         payload.food_amount_pretax
         if payload.food_amount_pretax is not None
@@ -581,6 +631,8 @@ def update_booking(
     )
     new_food_gst = round(new_food_pretax * 0.05, 2)
     booking.food_amount_pretax = new_food_pretax
+    booking.discount_code = upd_discount_code
+    booking.discount_pct = upd_discount_pct if upd_discount_pct > 0 else None
     booking.total_price = round(new_total + new_food_pretax + new_food_gst, 2)
     if payload.foodcourt_table_notes is not None:
         booking.foodcourt_table_notes = payload.foodcourt_table_notes
@@ -600,7 +652,33 @@ def update_booking(
     db.commit()
     db.refresh(booking)
 
-    return serialize_booking_with_payments(booking, PriceBreakdown(**breakdown))
+    # --- Regenerate Razorpay invoices with updated booking data ---
+    # Do this synchronously so the email always contains fresh invoice URLs.
+    if settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET and booking.razorpay_invoice_id:
+        try:
+            from .payments import regenerate_booking_invoices
+            regenerate_booking_invoices(booking, db)
+            db.refresh(booking)
+        except Exception as _rzp_exc:
+            logger.warning(
+                "Invoice regeneration failed during booking update %s (non-fatal): %s",
+                booking_id, _rzp_exc,
+            )
+
+    booking_out = serialize_booking_with_payments(booking, PriceBreakdown(**breakdown))
+
+    # Send modification summary email (Razorpay invoice URLs included via booking dict)
+    booking_dict = booking_out.model_dump(mode="json")
+    venue_dict = {"name": venue.name, "address": venue.address}
+    changes_str = "; ".join(changes)
+    background_tasks.add_task(
+        send_booking_modification_email,
+        booking=booking_dict,
+        venue=venue_dict,
+        changes_summary=changes_str,
+    )
+
+    return booking_out
 
 
 # ---------------------------------------------------------------------------

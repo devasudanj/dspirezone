@@ -176,6 +176,8 @@ class BookingCreate(BaseModel):
     notes: Optional[str] = None
     food_amount_pretax: float = 0.0   # Pre-tax food menu total — stored for 5% GST invoice
     line_items: List[BookingLineItemInput] = []
+    discount_code: Optional[str] = None
+    discount_pct: Optional[float] = None
 
     @field_validator("duration_hours")
     @classmethod
@@ -242,6 +244,8 @@ class BookingOut(BaseModel):
     razorpay_food_invoice_id: Optional[str] = None
     razorpay_food_invoice_short_url: Optional[str] = None
     food_amount_pretax: Optional[float] = None
+    discount_code: Optional[str] = None
+    discount_pct: Optional[float] = None
 
     model_config = {"from_attributes": True}
 
@@ -276,6 +280,8 @@ class BookingUpdate(BaseModel):
     changed_by_name: Optional[str] = None
     # Pre-tax food total — used to create the 5% GST food invoice
     food_amount_pretax: Optional[float] = None
+    # Discount code to apply / change (empty string = remove discount)
+    discount_code: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

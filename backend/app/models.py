@@ -158,6 +158,9 @@ class Booking(Base):
     foodcourt_table_notes = Column(Text)
     # Food menu selections (pre-tax total; stored separately for 5% GST invoice)
     food_amount_pretax = Column(Float, default=0.0, nullable=True)
+    # Discount applied at booking time
+    discount_code = Column(String(50), nullable=True)
+    discount_pct = Column(Float, nullable=True, default=0.0)
     # Razorpay invoices — event (18% GST) and food (5% GST)
     razorpay_invoice_id = Column(String(100), nullable=True)        # event invoice (legacy / default)
     razorpay_invoice_short_url = Column(String(500), nullable=True)
