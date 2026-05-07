@@ -11,12 +11,12 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import (
     Booking, BookingAuditLog, BookingLineItem, BookingStatus, CatalogItem,
-    DiscountCode, Payment, User, UserRole, Venue, PriceType,
+    DiscountCode, Payment, User, UserRole, Venue, PriceType, AdminNote,
 )
 from ..schemas import (
     BookingCreate, BookingOut, BookingOutWithPayments, BookingUpdate,
     PaymentCreate, PaymentOut, PaymentsSummary, BookingAuditLogOut,
-    PriceBreakdown,
+    PriceBreakdown, AdminNoteOut,
 )
 from ..deps import get_current_user, get_optional_user
 from ..core.availability import is_slot_available, check_overlap
@@ -372,11 +372,13 @@ def serialize_booking_with_payments(booking: Booking, breakdown: PriceBreakdown 
     total_paid = _total_paid(booking)
     remaining_due = max(0.0, booking.total_price - total_paid)
     audit = [BookingAuditLogOut.model_validate(a) for a in booking.audit_logs]
+    notes = [AdminNoteOut.model_validate(n) for n in booking.admin_notes]
     return BookingOutWithPayments(
         **base.model_dump(),
         total_paid=total_paid,
         remaining_due=remaining_due,
         audit_logs=audit,
+        admin_notes=notes,
     )
 
 

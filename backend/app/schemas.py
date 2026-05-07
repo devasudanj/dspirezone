@@ -324,11 +324,27 @@ class PaymentsSummary(BaseModel):
     remaining_due: float
 
 
+class AdminNoteCreate(BaseModel):
+    note_text: str
+    created_by_name: str = "Admin"
+
+
+class AdminNoteOut(BaseModel):
+    id: int
+    booking_id: int
+    note_text: str
+    created_by_name: str
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
 class BookingOutWithPayments(BookingOut):
     """Extended BookingOut that includes payment summary and audit history."""
     total_paid: float = 0.0
     remaining_due: float = 0.0
     audit_logs: List[BookingAuditLogOut] = []
+    admin_notes: List[AdminNoteOut] = []
 
 
 # ---------------------------------------------------------------------------

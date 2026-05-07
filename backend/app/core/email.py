@@ -745,8 +745,14 @@ def _build_modification_text_body(
     balance = max(0.0, float(total_price) - float(total_paid))
     code = booking.get("confirmation_code", "")
 
+    change_list = [c.strip() for c in changes_summary.split(";") if c.strip() and c.strip() != "No field changes detected"]
+    intro_line = (
+        "Your DspireZone booking has been updated. Please find the revised order summary below."
+        if change_list else
+        "Here is a summary of your DspireZone booking."
+    )
     lines = [
-        "Your DspireZone booking has been updated. Please find the revised order summary below.",
+        intro_line,
         "",
         f"Confirmation Code : {code}",
         f"Venue             : {venue.get('name', 'DspireZone')}",
@@ -756,9 +762,14 @@ def _build_modification_text_body(
         f"Customer Email    : {booking.get('contact_email') or 'N/A'}",
         f"Customer Phone    : {booking.get('contact_phone') or 'N/A'}",
         "",
-        "CHANGES MADE:",
-        *[f"  - {c.strip()}" for c in changes_summary.split(";") if c.strip() and c.strip() != "No field changes detected"],
-        "",
+    ]
+    if change_list:
+        lines += [
+            "CHANGES MADE:",
+            *[f"  - {c}" for c in change_list],
+            "",
+        ]
+    lines += [
         "ORDER SUMMARY:",
         f"  Event Space          : {_format_currency(breakdown.get('venue_subtotal', 0))}",
     ]
@@ -811,6 +822,7 @@ def _build_modification_html_body(
     # Build changes rows
     change_items = [c.strip() for c in changes_summary.split(";") if c.strip() and c.strip() != "No field changes detected"]
     changes_html = "".join(f"<li style='margin:4px 0'>{escape(c)}</li>" for c in change_items)
+    has_changes = bool(change_items)
 
     # Build order rows
     order_rows = [("Event Space", float(breakdown.get("venue_subtotal") or 0))]
@@ -881,15 +893,12 @@ def _build_modification_html_body(
 
   <div style="border:1px solid #e0d0ff;border-top:none;padding:24px;border-radius:0 0 8px 8px;">
 
-    <div style="background:#fff8e1;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:4px;margin-bottom:20px;">
-      <p style="margin:0;font-weight:bold;font-size:15px;">Your booking has been updated</p>
+    <div style="background:{'#fff8e1' if has_changes else '#f0f4ff'};border-left:4px solid {'#f59e0b' if has_changes else '#7c3aed'};padding:12px 16px;border-radius:4px;margin-bottom:20px;">
+      <p style="margin:0;font-weight:bold;font-size:15px;">{'Your booking has been updated' if has_changes else 'DspireZone Booking Summary'}</p>
       <p style="margin:4px 0 0;color:#555;font-size:13px;">Confirmation: <strong>{escape(code)}</strong></p>
     </div>
 
-    <h3 style="margin:0 0 8px;color:#7c3aed;">Changes Made</h3>
-    <ul style="margin:0 0 20px;padding-left:20px;color:#333;">
-      {changes_html or "<li>Details updated</li>"}
-    </ul>
+    {'<h3 style="margin:0 0 8px;color:#7c3aed;">Changes Made</h3><ul style="margin:0 0 20px;padding-left:20px;color:#333;">' + changes_html + '</ul>' if has_changes else ''}
 
     <h3 style="margin:0 0 10px;color:#7c3aed;">Booking Details</h3>
     <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">

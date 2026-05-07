@@ -146,10 +146,19 @@ export interface BookingAuditLog {
   change_summary?: string;
 }
 
+export interface AdminNote {
+  id: number;
+  booking_id: number;
+  note_text: string;
+  created_by_name: string;
+  created_at?: string;
+}
+
 export interface BookingWithPayments extends Booking {
   total_paid: number;
   remaining_due: number;
   audit_logs: BookingAuditLog[];
+  admin_notes: AdminNote[];
 }
 
 export interface PaymentsSummary {

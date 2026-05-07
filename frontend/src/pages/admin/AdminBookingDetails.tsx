@@ -23,12 +23,12 @@ import {
   Typography,
 } from "@mui/material";
 import {
-  ArrowBack, ContentCopy, Edit, Email, OpenInNew, Save, CheckCircle,
+  ArrowBack, ContentCopy, Delete, Edit, Email, OpenInNew, Save, CheckCircle, NoteAdd,
 } from "@mui/icons-material";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import api from "../../api/client";
 import { BRAND } from "../../theme";
-import type { BookingWithPayments, SplitInvoiceOut } from "../../types";
+import type { BookingWithPayments, SplitInvoiceOut, AdminNote } from "../../types";
 
 const STATUS_COLOR: Record<string, "success" | "warning" | "error" | "default"> = {
   confirmed: "success",
@@ -60,6 +60,14 @@ export default function AdminBookingDetails() {
   const [emailSent, setEmailSent] = useState(false);
   const [emailError, setEmailError] = useState("");
 
+  // Admin notes
+  const [adminNotes, setAdminNotes] = useState<AdminNote[]>([]);
+  const [newNoteText, setNewNoteText] = useState("");
+  const [noteAuthor, setNoteAuthor] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteError, setNoteError] = useState("");
+  const [deletingNoteId, setDeletingNoteId] = useState<number | null>(null);
+
   // Copy link snackbar
   const [linkCopied, setLinkCopied] = useState(false);
 
@@ -76,6 +84,7 @@ export default function AdminBookingDetails() {
         setBooking(res.data);
         setAltEmail(res.data.alt_email ?? "");
         setAltPhone(res.data.alt_phone ?? "");
+        setAdminNotes(res.data.admin_notes ?? []);
         // Pre-fill invoices if already generated
         if (res.data.razorpay_invoice_id && res.data.razorpay_invoice_short_url) {
           const bookingId = res.data.id;
@@ -105,6 +114,37 @@ export default function AdminBookingDetails() {
     if (!booking) return 0;
     return getDurationHours(booking.start_time, booking.end_time);
   }, [booking]);
+
+  const handleSaveNote = async () => {
+    if (!bookingId || !newNoteText.trim()) return;
+    setSavingNote(true);
+    setNoteError("");
+    try {
+      const res = await api.post<AdminNote>(`/admin/bookings/${bookingId}/notes`, {
+        note_text: newNoteText.trim(),
+        created_by_name: noteAuthor.trim() || "Admin",
+      });
+      setAdminNotes((prev) => [res.data, ...prev]);
+      setNewNoteText("");
+    } catch (err) {
+      setNoteError(err instanceof Error ? err.message : "Failed to save note.");
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const handleDeleteNote = async (noteId: number) => {
+    if (!bookingId) return;
+    setDeletingNoteId(noteId);
+    try {
+      await api.delete(`/admin/bookings/${bookingId}/notes/${noteId}`);
+      setAdminNotes((prev) => prev.filter((n) => n.id !== noteId));
+    } catch {
+      // silently ignore
+    } finally {
+      setDeletingNoteId(null);
+    }
+  };
 
   const modifyLink = booking
     ? `${window.location.origin}/modify-booking/${booking.confirmation_code}`
@@ -359,6 +399,15 @@ export default function AdminBookingDetails() {
                     <Typography><strong>Rooms:</strong> {booking.rooms_included_count + (booking.extra_rooms_count ?? 0)}</Typography>
                     <Typography><strong>Extra Rooms:</strong> {booking.extra_rooms_count ?? 0}</Typography>
                     <Typography><strong>Food Court Tables:</strong> {booking.foodcourt_tables_count ?? 0}</Typography>
+                    {booking.discount_code && (
+                      <Typography>
+                        <strong>Discount Code:</strong>{" "}
+                        <span style={{ fontFamily: "monospace", background: "#f3eeff", padding: "2px 6px", borderRadius: 4 }}>
+                          {booking.discount_code}
+                        </span>
+                        {booking.discount_pct ? ` — ${booking.discount_pct}% off venue` : ""}
+                      </Typography>
+                    )}
                     <Divider sx={{ my: 0.5 }} />
                     <Typography><strong>Total:</strong> ₹{Number(booking.total_price).toLocaleString("en-IN")}</Typography>
                     <Typography color="success.main"><strong>Paid:</strong> ₹{Number(booking.total_paid).toLocaleString("en-IN")}</Typography>
@@ -445,6 +494,97 @@ export default function AdminBookingDetails() {
                 </Stack>
               </Paper>
             )}
+
+            {/* ── Admin Notes ── */}
+            <Paper sx={{ p: 3, borderRadius: 3 }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                <NoteAdd sx={{ color: BRAND.purple }} />
+                <Typography variant="h6" fontWeight={700}>Admin Notes</Typography>
+              </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
+                Internal notes visible only to admins. Use this to track follow-ups, calls, or status updates.
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+
+              {/* Add new note form */}
+              <Stack spacing={1.5} sx={{ mb: 3 }}>
+                <TextField
+                  label="Author name"
+                  size="small"
+                  value={noteAuthor}
+                  onChange={(e) => setNoteAuthor(e.target.value)}
+                  placeholder="Your name"
+                  sx={{ maxWidth: 300 }}
+                />
+                <TextField
+                  label="New note"
+                  multiline
+                  minRows={3}
+                  fullWidth
+                  value={newNoteText}
+                  onChange={(e) => setNewNoteText(e.target.value)}
+                  placeholder="Enter follow-up details, status update, customer call notes…"
+                />
+                {noteError && <Typography variant="body2" color="error">{noteError}</Typography>}
+                <Button
+                  variant="contained"
+                  startIcon={<NoteAdd />}
+                  onClick={handleSaveNote}
+                  disabled={savingNote || !newNoteText.trim()}
+                  sx={{ alignSelf: "flex-start", bgcolor: BRAND.purple, "&:hover": { bgcolor: "#5b21b6" } }}
+                >
+                  {savingNote ? "Saving…" : "Add Note"}
+                </Button>
+              </Stack>
+
+              {/* Notes history */}
+              {adminNotes.length === 0 ? (
+                <Typography color="text.secondary" variant="body2">No admin notes yet.</Typography>
+              ) : (
+                <Stack spacing={1.5}>
+                  {adminNotes.map((note) => (
+                    <Box
+                      key={note.id}
+                      sx={{
+                        p: 2,
+                        borderRadius: 2,
+                        bgcolor: "#f9f7ff",
+                        border: "1px solid #e0d0ff",
+                        position: "relative",
+                      }}
+                    >
+                      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={1}>
+                        <Box sx={{ flex: 1 }}>
+                          <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", mb: 0.75 }}>
+                            {note.note_text}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            <strong>{note.created_by_name}</strong>
+                            {note.created_at
+                              ? ` · ${new Date(note.created_at).toLocaleString("en-IN", {
+                                  dateStyle: "medium",
+                                  timeStyle: "short",
+                                  timeZone: "Asia/Kolkata",
+                                })} IST`
+                              : ""}
+                          </Typography>
+                        </Box>
+                        <Tooltip title="Delete note">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleDeleteNote(note.id)}
+                            disabled={deletingNoteId === note.id}
+                          >
+                            <Delete fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    </Box>
+                  ))}
+                </Stack>
+              )}
+            </Paper>
 
             {/* ── Invoice ── */}
             <Paper sx={{ p: 3, borderRadius: 3 }}>

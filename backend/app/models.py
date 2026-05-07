@@ -172,6 +172,7 @@ class Booking(Base):
     line_items = relationship("BookingLineItem", back_populates="booking", cascade="all, delete-orphan")
     payments = relationship("Payment", back_populates="booking", order_by="Payment.created_at", cascade="all, delete-orphan")
     audit_logs = relationship("BookingAuditLog", back_populates="booking", order_by="BookingAuditLog.changed_at", cascade="all, delete-orphan")
+    admin_notes = relationship("AdminNote", back_populates="booking", order_by="AdminNote.created_at", cascade="all, delete-orphan")
 
 
 class BookingLineItem(Base):
@@ -232,6 +233,18 @@ class BookingAuditLog(Base):
     change_summary = Column(Text)
 
     booking = relationship("Booking", back_populates="audit_logs")
+
+
+class AdminNote(Base):
+    __tablename__ = "admin_notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=False, index=True)
+    note_text = Column(Text, nullable=False)
+    created_by_name = Column(String(200), nullable=False, default="Admin")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    booking = relationship("Booking", back_populates="admin_notes")
 
 
 class DiscountCode(Base):

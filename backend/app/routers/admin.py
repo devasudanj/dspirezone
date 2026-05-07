@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import (
     Booking, BookingStatus, CatalogItem, Venue,
-    AvailabilityRule, BlackoutDate
+    AvailabilityRule, BlackoutDate, AdminNote,
 )
 from ..schemas import (
     BookingOut, BookingStatusUpdate, BookingOutWithPayments,
@@ -13,14 +13,56 @@ from ..schemas import (
     VenueOut, VenueUpdate,
     AvailabilityRuleCreate, AvailabilityRuleOut,
     BlackoutDateCreate, BlackoutDateOut,
+    AdminNoteCreate, AdminNoteOut,
 )
 from ..deps import get_admin_user
 from ..models import User
 from .bookings import serialize_booking, serialize_booking_with_payments
 from ..core.email import send_booking_reminder_email
 from ..core.cal_com import cancel_cal_booking
+from ..core.pricing import calculate_booking_breakdown, calculate_line_item_total
+from ..schemas import PriceBreakdown
 
 router = APIRouter()
+
+
+def _rebuild_breakdown_for_booking(booking: "Booking", venue: "Venue") -> "PriceBreakdown":
+    """Reconstruct the price breakdown from stored booking data so emails show correct subtotals."""
+    from datetime import datetime, timedelta, date as date_type, time as time_type
+    raw_date = booking.date
+    if isinstance(raw_date, str):
+        raw_date = date_type.fromisoformat(raw_date)
+    raw_start = booking.start_time
+    raw_end = booking.end_time
+    if isinstance(raw_start, str):
+        raw_start = time_type.fromisoformat(raw_start)
+    if isinstance(raw_end, str):
+        raw_end = time_type.fromisoformat(raw_end)
+    duration_hours = max(
+        0.0,
+        (datetime.combine(raw_date, raw_end) - datetime.combine(raw_date, raw_start)).seconds / 3600,
+    )
+    line_items_data = [
+        {
+            "catalog_item_id": li.catalog_item_id,
+            "item_type": li.item_type,
+            "item_name": li.item_name,
+            "quantity": li.quantity,
+            "unit_price": float(li.unit_price),
+            "price_type": li.price_type,
+            "unit_label": li.unit_label,
+            "line_total": float(li.line_total),
+        }
+        for li in booking.line_items
+    ]
+    bd = calculate_booking_breakdown(
+        venue=venue,
+        duration_hours=duration_hours,
+        line_items_data=line_items_data,
+        foodcourt_tables_count=booking.foodcourt_tables_count or 0,
+        extra_rooms_count=booking.extra_rooms_count or 0,
+    )
+    return PriceBreakdown(**bd)
 
 
 # ---------------------------------------------------------------------------
@@ -287,15 +329,86 @@ def admin_resend_booking_email(
         raise HTTPException(404, "Venue not found")
 
     from .bookings import serialize_booking as _sb
-    booking_dict = _sb(booking).model_dump(mode="json")
+    breakdown = _rebuild_breakdown_for_booking(booking, venue)
+    booking_dict = _sb(booking, breakdown).model_dump(mode="json")
     venue_dict = {"name": venue.name, "address": venue.address}
 
     extra: list[str] = []
     if booking.alt_email:
         extra.append(booking.alt_email)
+    # Merge alt_email into booking_dict so send_booking_modification_email picks it up
+    if booking.alt_email:
+        booking_dict["alt_email"] = booking.alt_email
 
     try:
-        send_booking_reminder_email(booking_dict, venue_dict, extra, raise_on_error=True)
+        from ..core.email import send_booking_modification_email as _send_mod
+        _send_mod(booking_dict, venue_dict, changes_summary="")
     except Exception as exc:
         raise HTTPException(500, f"Email send failed: {exc}")
     return {"message": "Email sent successfully"}
+
+
+# ---------------------------------------------------------------------------
+# Admin Notes
+# ---------------------------------------------------------------------------
+
+@router.get("/bookings/{booking_id}/notes", response_model=List[AdminNoteOut])
+def list_admin_notes(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_admin_user),
+):
+    """Return all admin notes for a booking, newest first."""
+    if not db.get(Booking, booking_id):
+        raise HTTPException(404, "Booking not found")
+    notes = (
+        db.query(AdminNote)
+        .filter(AdminNote.booking_id == booking_id)
+        .order_by(AdminNote.created_at.desc())
+        .all()
+    )
+    return notes
+
+
+@router.post("/bookings/{booking_id}/notes", response_model=AdminNoteOut, status_code=201)
+def add_admin_note(
+    booking_id: int,
+    payload: AdminNoteCreate,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_admin_user),
+):
+    """Add an admin note to a booking."""
+    if not db.get(Booking, booking_id):
+        raise HTTPException(404, "Booking not found")
+    note_text = payload.note_text.strip()
+    if not note_text:
+        raise HTTPException(400, "Note text cannot be empty")
+    author = payload.created_by_name.strip() or (current_admin.name if current_admin.name else "Admin")
+    note = AdminNote(
+        booking_id=booking_id,
+        note_text=note_text,
+        created_by_name=author,
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return note
+
+
+@router.delete("/bookings/{booking_id}/notes/{note_id}", status_code=204)
+def delete_admin_note(
+    booking_id: int,
+    note_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_admin_user),
+):
+    """Delete an admin note."""
+    note = db.query(AdminNote).filter(
+        AdminNote.id == note_id,
+        AdminNote.booking_id == booking_id,
+    ).first()
+    if not note:
+        raise HTTPException(404, "Note not found")
+    db.delete(note)
+    db.commit()
+
