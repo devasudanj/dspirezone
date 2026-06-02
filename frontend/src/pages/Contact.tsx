@@ -67,10 +67,10 @@ export default function Contact() {
             </Typography>
             <Stack spacing={3}>
               {[
-                { icon: <LocationOn />, label: "Address", text: "30 Srinivasa Perumal Sannathi, Anna Salai\nNew Perungalathur, Chennai – 600 063\nTamil Nadu" },
-                { icon: <Email />, label: "Email", text: "hello@dspirezone.com" },
+                { icon: <LocationOn />, label: "Address", text: "30 Srinivasa Perumal Sannathi Salai\nNew Perungalathur, Chennai, Tamil Nadu 600063\nIndia" },
+                { icon: <Email />, label: "Email", text: "admin@dspirezone.com" },
                 { icon: <Phone />, label: "Phone", text: "+91 80654 81150" },
-                { icon: <AccessTime />, label: "Hours", text: "Mon–Fri: 10am–9pm\nSat–Sun: 9am–10pm" },
+                { icon: <AccessTime />, label: "Hours", text: "Mon–Fri: 9am–8:30pm\nSat–Sun: 9am–9pm" },
               ].map((item, i) => (
                 <Box key={i} sx={{ display: "flex", gap: 2 }}>
                   <Avatar sx={{ bgcolor: `${BRAND.purple}18`, color: BRAND.purple }}>{item.icon}</Avatar>

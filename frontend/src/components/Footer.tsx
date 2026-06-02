@@ -115,19 +115,19 @@ export default function Footer() {
               <Box sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
                 <LocationOn sx={{ fontSize: 18, opacity: 0.7, mt: 0.2, flexShrink: 0 }} />
                 <Typography variant="body2" sx={{ opacity: 0.7, lineHeight: 1.6 }}>
-                  30 Srinivasa Perumal Sannathi, Anna Salai, New Perungalathur, Chennai – 600 063, Tamil Nadu
+                  30 Srinivasa Perumal Sannathi Salai, New Perungalathur, Chennai, Tamil Nadu 600063, India
                 </Typography>
               </Box>
               <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
                 <Email sx={{ fontSize: 18, opacity: 0.7 }} />
                 <Typography variant="body2" sx={{ opacity: 0.7 }}>
-                  hello@dspirezone.com
+                  admin@dspirezone.com
                 </Typography>
               </Box>
               <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
                 <Phone sx={{ fontSize: 18, opacity: 0.7 }} />
                 <Typography variant="body2" sx={{ opacity: 0.7 }}>
-                  +91 98765 43210
+                  +91 80654 81150
                 </Typography>
               </Box>
               <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>

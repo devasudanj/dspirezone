@@ -789,10 +789,10 @@ export default function Home() {
               <Grid item xs={12} md={5}>
                 <Stack spacing={3}>
                   {[
-                    { icon: <LocationOn />, title: "Address", detail: "30 Srinivasa Perumal Sannathi, Anna Salai, New Perungalathur, Chennai – 600 063, Tamil Nadu" },
-                    { icon: <Email />, title: "Email", detail: "hello@dspirezone.com" },
-                    { icon: <Phone />, title: "Phone", detail: "+91 98765 43210" },
-                    { icon: <AccessTime />, title: "Hours", detail: "Mon–Fri: 10am–9pm  |  Sat–Sun: 9am–10pm" },
+                    { icon: <LocationOn />, title: "Address", detail: "30 Srinivasa Perumal Sannathi St, New Perungalathur, Chennai, Tamil Nadu 600063, India" },
+                    { icon: <Email />, title: "Email", detail: "admin@dspirezone.com" },
+                    { icon: <Phone />, title: "Phone", detail: "+91 80654 81150" },
+                    { icon: <AccessTime />, title: "Hours", detail: "Mon–Fri: 9am–8:30pm  |  Sat–Sun: 9am–9pm" },
                   ].map((c) => (
                     <Box key={c.title} sx={{ display: "flex", gap: 2.5, alignItems: "flex-start" }}>
                       <Avatar sx={{ bgcolor: `${BRAND.purple}33`, color: BRAND.goldLight, flexShrink: 0 }}>{c.icon}</Avatar>
@@ -806,16 +806,21 @@ export default function Home() {
               </Grid>
               <Grid item xs={12} md={7}>
                 <Box sx={{
-                  height: 300, borderRadius: 4,
-                  background: `linear-gradient(135deg, ${BRAND.purple}22 0%, ${BRAND.gold}18 100%)`,
-                  border: `2px dashed rgba(245,158,11,0.35)`,
-                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2,
+                  height: 380, borderRadius: 4,
+                  overflow: "hidden",
+                  border: `2px solid rgba(245,158,11,0.35)`,
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.35)",
                 }}>
-                  <LocationOn sx={{ fontSize: 52, color: BRAND.goldLight, opacity: 0.6 }} />
-                  <Typography sx={{ color: "rgba(255,255,255,0.7)", textAlign: "center" }}>
-                    New Perungalathur, Chennai – 600 063
-                    <Box component="span" sx={{ display: "block", fontSize: 13, color: "rgba(255,255,255,0.4)", mt: 0.5 }}>(Add Google Maps embed in production)</Box>
-                  </Typography>
+                  <iframe
+                    title="Dspire Zone Location"
+                    src="https://maps.google.com/maps?q=Dspire+Zone%2C+30+Srinivasa+Perumal%2C+Sannathi+St%2C+New+Perungalathur%2C+Chennai%2C+Tamil+Nadu+600063%2C+India&output=embed&z=19"
+                    width="100%"
+                    height="380"
+                    style={{ border: 0 }}
+                    allowFullScreen
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                  />
                 </Box>
               </Grid>
             </Grid>
@@ -854,6 +859,17 @@ export default function Home() {
               sx={{ py: 2, px: 4, fontWeight: 700, fontSize: 15, color: "white", borderColor: "rgba(255,255,255,0.5)", borderRadius: 3, borderWidth: 2, "&:hover": { borderWidth: 2, borderColor: "white", bgcolor: "rgba(255,255,255,0.08)" } }}
             >
               Modify My Booking
+            </Button>
+            <Button
+              href="https://wa.me/919876543210"
+              target="_blank"
+              rel="noopener noreferrer"
+              variant="contained"
+              size="large"
+              startIcon={<span style={{ fontSize: 20 }}>💬</span>}
+              sx={{ py: 2, px: 4, fontWeight: 700, fontSize: 15, borderRadius: 3, bgcolor: "#25D366", color: "white", boxShadow: "0 8px 24px rgba(37,211,102,0.45)", "&:hover": { bgcolor: "#1ebe5d" } }}
+            >
+              Chat with Us
             </Button>
           </Stack>
         </Container>
