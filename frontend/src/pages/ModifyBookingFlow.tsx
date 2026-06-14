@@ -61,7 +61,7 @@ function parseFoodSelectionsFromNotes(
     }
   }
   return result;
-}────
+}
 
 // ─── Razorpay types & script loader ──────────────────────────────────────────
 interface RazorpayOrderOut {
