@@ -209,3 +209,24 @@ def cancel_invoice(invoice_id: str) -> dict:
             return get_resp.json()
         resp.raise_for_status()
         return resp.json()
+
+
+def patch_invoice_notes(invoice_id: str, notes: dict) -> dict:
+    """
+    Patch the notes on a Razorpay invoice.
+    Works on draft invoices; issued invoices may return 400 — errors are
+    logged but not raised so the caller can continue gracefully.
+    """
+    with httpx.Client(timeout=15) as client:
+        resp = client.patch(
+            f"{_BASE_URL}/invoices/{invoice_id}",
+            json={"notes": notes},
+            auth=_auth(),
+        )
+        if not resp.is_success:
+            logger.warning(
+                "patch_invoice_notes: could not update notes for %s (status %s): %s",
+                invoice_id, resp.status_code, resp.text,
+            )
+            return {}
+        return resp.json()

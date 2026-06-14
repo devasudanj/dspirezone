@@ -93,6 +93,13 @@ def health():
 
 
 # ---------------------------------------------------------------------------
+# Serve uploaded media (food thumbnails, etc.)
+# ---------------------------------------------------------------------------
+_media_dir = Path(__file__).parent.parent / "media"
+_media_dir.mkdir(exist_ok=True)
+app.mount("/media", StaticFiles(directory=str(_media_dir)), name="media")
+
+# ---------------------------------------------------------------------------
 # Serve built React SPA (production)
 # ---------------------------------------------------------------------------
 _static_dir = Path(__file__).parent.parent / "static"

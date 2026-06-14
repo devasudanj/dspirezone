@@ -1,0 +1,58 @@
+<svg width="1200" height="320" viewBox="0 0 1200 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000000" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="320" fill="#FFFFFF"/>
+
+  <!-- Icon Group -->
+  <g transform="translate(70,45)" filter="url(#softShadow)">
+    <!-- Stylized D outer -->
+    <rect x="0" y="0" width="145" height="170" rx="38" fill="#F58220"/>
+    <path d="M42 34H87C130 34 155 58 155 85C155 112 130 136 87 136H42V34Z" fill="#F58220"/>
+    
+    <!-- Inner white space for D -->
+    <rect x="28" y="28" width="62" height="114" rx="16" fill="#FFFFFF"/>
+    <path d="M60 58H87C106 58 118 69 118 85C118 101 106 112 87 112H60V58Z" fill="#FFFFFF"/>
+
+    <!-- Accent top stroke -->
+    <path d="M106 18H180C194 18 205 28 209 42" stroke="#F58220" stroke-width="12" stroke-linecap="round"/>
+  </g>
+
+  <!-- Brand Name -->
+  <g transform="translate(280,72)">
+    <!-- DSPIRE -->
+    <text x="0" y="72"
+          font-family="Arial, Helvetica, sans-serif"
+          font-size="88"
+          font-weight="800"
+          letter-spacing="1.5"
+          fill="#F58220">DSPIRE</text>
+
+    <!-- ZONE -->
+    <text x="395" y="72"
+          font-family="Arial, Helvetica, sans-serif"
+          font-size="88"
+          font-weight="800"
+          letter-spacing="2"
+          fill="#555555">ZONE</text>
+
+    <!-- Divider -->
+    <rect x="2" y="102" width="670" height="4" rx="2" fill="#E9E9E9"/>
+
+    <!-- Tagline box -->
+    <rect x="260" y="132" width="360" height="54" rx="12" fill="#F58220"/>
+
+    <!-- Tagline -->
+    <text x="440" y="168"
+          text-anchor="middle"
+          font-family="Arial, Helvetica, sans-serif"
+          font-size="28"
+          font-weight="700"
+          letter-spacing="2"
+          fill="#FFFFFF">FOOD • GAMES • EVENTS</text>
+  </g>
+</svg>

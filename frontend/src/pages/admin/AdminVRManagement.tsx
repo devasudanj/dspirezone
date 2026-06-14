@@ -37,6 +37,7 @@ import {
 } from "@mui/material";
 import {
   Add,
+  Delete,
   Edit,
   FileUpload,
   Headset,
@@ -50,6 +51,7 @@ import {
   createGame,
   createHeadset,
   createInstallation,
+  deleteInstallation,
   fetchGame,
   fetchGames,
   fetchHeadsets,
@@ -73,6 +75,8 @@ import {
 } from "../../api/vrClient";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
+
+const EXCLUDED_HEADSET_CODES = ["DZ4", "DZ5", "DZ6"];
 
 const STATUS_COLOR: Record<
   VRGameStatus | InstallationStatus,
@@ -667,7 +671,9 @@ function HeadsetsTab() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  headsets.map((h) => (
+                  headsets
+                    .filter((h) => !EXCLUDED_HEADSET_CODES.includes(h.code))
+                    .map((h) => (
                     <TableRow key={h.id} hover>
                       <TableCell>{h.id}</TableCell>
                       <TableCell>
@@ -773,6 +779,7 @@ function InstallationsTab() {
   const [selectedHeadsetIds, setSelectedHeadsetIds] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveProgress, setSaveProgress] = useState<{ done: number; total: number } | null>(null);
+  const [removingInstallId, setRemovingInstallId] = useState<number | null>(null);
 
   // Build a lookup map so we never rely on API returning headset_code
   const headsetMap = useMemo(
@@ -820,6 +827,19 @@ function InstallationsTab() {
     setError(null);
     setSaveProgress(null);
     setDialogOpen(true);
+  };
+
+  const handleRemoveInstallation = async (installId: number) => {
+    setRemovingInstallId(installId);
+    setError(null);
+    try {
+      await deleteInstallation(installId);
+      if (selectedGame) loadInstallations(selectedGame as number);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to remove installation.");
+    } finally {
+      setRemovingInstallId(null);
+    }
   };
 
   const toggleHeadset = (id: number) => {
@@ -934,12 +954,13 @@ function InstallationsTab() {
                   <TableCell sx={{ fontWeight: 700 }}>Install Date</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Expiry Date</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="right">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {installations.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} align="center" sx={{ py: 5, color: "text.secondary" }}>
+                    <TableCell colSpan={7} align="center" sx={{ py: 5, color: "text.secondary" }}>
                       No headsets installed on this game yet.
                     </TableCell>
                   </TableRow>
@@ -975,6 +996,22 @@ function InstallationsTab() {
                             color={statusColor}
                             sx={{ fontWeight: 700 }}
                           />
+                        </TableCell>
+                        <TableCell align="right">
+                          <Tooltip title="Remove headset from game">
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => handleRemoveInstallation(inst.id)}
+                                disabled={removingInstallId === inst.id}
+                              >
+                                {removingInstallId === inst.id
+                                  ? <CircularProgress size={16} />
+                                  : <Delete fontSize="small" />}
+                              </IconButton>
+                            </span>
+                          </Tooltip>
                         </TableCell>
                       </TableRow>
                     );
@@ -1051,15 +1088,18 @@ function InstallationsTab() {
                 </Typography>
                 <Button
                   size="small"
-                  onClick={() =>
+                  onClick={() => {
+                    const assignable = headsets.filter((h) => !EXCLUDED_HEADSET_CODES.includes(h.code));
                     setSelectedHeadsetIds(
-                      selectedHeadsetIds.length === headsets.length
+                      selectedHeadsetIds.length === assignable.length
                         ? []
-                        : headsets.map((h) => h.id)
-                    )
-                  }
+                        : assignable.map((h) => h.id)
+                    );
+                  }}
                 >
-                  {selectedHeadsetIds.length === headsets.length ? "Deselect All" : "Select All"}
+                  {selectedHeadsetIds.length === headsets.filter((h) => !EXCLUDED_HEADSET_CODES.includes(h.code)).length && headsets.filter((h) => !EXCLUDED_HEADSET_CODES.includes(h.code)).length > 0
+                    ? "Deselect All"
+                    : "Select All"}
                 </Button>
               </Stack>
               <Paper variant="outlined" sx={{ borderRadius: 2, maxHeight: 260, overflowY: "auto" }}>
@@ -1068,7 +1108,7 @@ function InstallationsTab() {
                     No headsets available. Add headsets in the Headsets tab first.
                   </Typography>
                 ) : (
-                  headsets.map((h) => {
+                  headsets.filter((h) => !EXCLUDED_HEADSET_CODES.includes(h.code)).map((h) => {
                     const alreadyInstalled = installedHeadsetIds.has(h.id) && formBase.game_id === selectedGame;
                     const checked = selectedHeadsetIds.includes(h.id);
                     return (

@@ -143,6 +143,9 @@ export const fetchInstallations = (gameId: number) =>
 export const createInstallation = (payload: VRInstallationPayload) =>
   vrApi.post<VRInstallation>("/admin/installations", payload);
 
+export const deleteInstallation = (id: number) =>
+  vrApi.delete<void>(`/admin/installations/${id}`);
+
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
 export interface VRSession {

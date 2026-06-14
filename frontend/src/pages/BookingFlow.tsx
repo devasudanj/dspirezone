@@ -19,7 +19,28 @@ import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import PriceBreakdown from "../components/PriceBreakdown";
 import { BRAND } from "../theme";
-import type { Venue, CatalogItem, AvailableSlot, PriceBreakdown as PriceBreakdownType, Booking } from "../types";
+import type { Venue, CatalogItem, AvailableSlot, PriceBreakdown as PriceBreakdownType, Booking, FoodMenuItem } from "../types";
+
+// Normalize a catalog food_item from the API into a FoodMenuItem
+function toFoodMenuItem(item: CatalogItem): FoodMenuItem {
+  return {
+    key: String(item.id),
+    id: item.id,
+    label: item.name,
+    note: item.description ?? "",
+    price: item.price,
+    priceLabel: item.price_label ?? `\u20b9${item.price} per ${item.unit_label ?? "item"}`,
+    emoji: item.emoji ?? "\u{1f37d}\ufe0f",
+    bg: item.bg_color ?? "#f5f5f5",
+    shared: item.shared ?? false,
+    step: item.step ?? 1,
+    active: item.active,
+    sort_order: item.sort_order,
+    images: [item.thumbnail_url, item.image_url_2, item.image_url_3].filter((u): u is string => !!u),
+    category: item.category ?? item.name,
+    moq: item.min_order_qty ?? 10,
+  };
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface LineItemInput {
@@ -56,21 +77,6 @@ const STEPS = [
   "Favors & Essentials",
   "Order Review",
   "Payment",
-];
-
-const FOOD_MENU = [
-  // ── Personal (per head, not shareable) ──
-  { key: "pizza_chicken",         label: "Personal Pizza – Chicken",    note: "Personal size · not shareable",      price: 199, priceLabel: "₹199 per item",         emoji: "🍕", bg: "#fff3e0", shared: false, step: 1  },
-  { key: "pizza_veg",             label: "Personal Pizza – Veg",        note: "Personal size · not shareable",      price: 179, priceLabel: "₹179 per item",         emoji: "🍕", bg: "#f1f8e9", shared: false, step: 1  },
-  { key: "mutton_biryani_kids",   label: "Mutton Biryani – Kids",       note: "Kids portion · per head",            price: 249, priceLabel: "₹249 per head",         emoji: "🍚", bg: "#fce4ec", shared: false, step: 1  },
-  { key: "mutton_biryani_adult",  label: "Mutton Biryani – Adult",      note: "Full adult portion · per head",      price: 349, priceLabel: "₹349 per head",         emoji: "🍛", bg: "#fce4ec", shared: false, step: 1  },
-  { key: "chicken_biryani_kids",  label: "Chicken Biryani – Kids",      note: "Kids portion · per head",            price: 199, priceLabel: "₹199 per head",         emoji: "🍚", bg: "#e8f5e9", shared: false, step: 1  },
-  { key: "chicken_biryani_adult", label: "Chicken Biryani – Adult",     note: "Full adult portion · per head",      price: 299, priceLabel: "₹299 per head",         emoji: "🍛", bg: "#e8f5e9", shared: false, step: 1  },
-  { key: "veg_package",           label: "Veg Package",                 note: "Per head · includes rice & sides",   price: 149, priceLabel: "₹149 per head",         emoji: "🥗", bg: "#e8f5e9", shared: false, step: 1  },
-  // ── Shareable ──
-  { key: "large_pizza",           label: "Large Pizza",                 note: "Serves 3 people · shareable",        price: 599, priceLabel: "₹599 each (serves 3)",   emoji: "🍕", bg: "#fff3e0", shared: true,  step: 1  },
-  { key: "fish_fingers",          label: "Fish Fingers",                note: "Shareable · sold in packs of 10",    price: 299, priceLabel: "₹299 per 10 pcs",       emoji: "🐟", bg: "#e3f2fd", shared: true,  step: 10 },
-  { key: "chicken_nuggets",       label: "Chicken Nuggets",             note: "Shareable · sold in packs of 10",    price: 249, priceLabel: "₹249 per 10 pcs",       emoji: "🍗", bg: "#fff8e1", shared: true,  step: 10 },
 ];
 
 const MotionBox = motion(Box);
@@ -413,28 +419,62 @@ function FoodCourtStep({
 }
 
 // ─── Step 5 ───────────────────────────────────────────────────────────────────
+type CategoryGroup = { category: string; moq: number; items: FoodMenuItem[] };
+
+function buildCategoryGroups(items: FoodMenuItem[]): CategoryGroup[] {
+  const map = new Map<string, CategoryGroup>();
+  for (const item of items) {
+    const cat = item.category;
+    if (!map.has(cat)) map.set(cat, { category: cat, moq: item.moq, items: [] });
+    map.get(cat)!.items.push(item);
+  }
+  return Array.from(map.values());
+}
+
 function FoodSelectionStep({
-  state, setState,
+  state, setState, foodMenu, loadingFood,
 }: {
   state: BookingState;
   setState: (s: Partial<BookingState>) => void;
+  foodMenu: FoodMenuItem[];
+  loadingFood: boolean;
 }) {
-  const setQty = (key: string, delta: number, step: number) => {
+  // MOQ-aware quantity setter:
+  // First click jumps to MOQ (for solo categories); - below MOQ snaps to 0
+  const setQty = (key: string, delta: number, item: FoodMenuItem, groupTotal: number) => {
     const current = state.foodSelections[key] ?? 0;
-    setState({ foodSelections: { ...state.foodSelections, [key]: Math.max(0, current + delta) } });
+    let next = current + delta;
+    // For solo categories (group has exactly 1 item): enforce MOQ on first add
+    const isSoloCategory = foodMenu.filter((m) => m.category === item.category).length === 1;
+    if (isSoloCategory) {
+      if (delta > 0 && current === 0) next = Math.max(item.moq, item.step);
+      else if (delta < 0 && next > 0 && next < item.moq) next = 0;
+    }
+    setState({ foodSelections: { ...state.foodSelections, [key]: Math.max(0, next) } });
   };
 
-  const itemCost = (m: (typeof FOOD_MENU)[number]) => {
+  const itemCost = (m: FoodMenuItem) => {
     const qty = state.foodSelections[m.key] ?? 0;
     return m.step > 1 ? (qty / m.step) * m.price : m.price * qty;
   };
   const totalItems = Object.values(state.foodSelections).reduce((a, b) => a + b, 0);
-  const totalCost = FOOD_MENU.reduce((sum, m) => sum + itemCost(m), 0);
+  const totalCost = foodMenu.reduce((sum, m) => sum + itemCost(m), 0);
 
-  const personalItems = FOOD_MENU.filter((m) => !m.shared);
-  const shareableItems = FOOD_MENU.filter((m) => m.shared);
+  const personalItems = foodMenu.filter((m) => !m.shared);
+  const shareableItems = foodMenu.filter((m) => m.shared);
+  const personalGroups = buildCategoryGroups(personalItems);
+  const shareableGroups = buildCategoryGroups(shareableItems);
 
-  const renderCard = (item: (typeof FOOD_MENU)[number]) => {
+  // Collect MOQ violations: categories where something is selected but total < moq
+  const moqViolations: { category: string; moq: number; total: number }[] = [];
+  for (const group of [...personalGroups, ...shareableGroups]) {
+    const total = group.items.reduce((s, m) => s + (state.foodSelections[m.key] ?? 0), 0);
+    if (total > 0 && total < group.moq) {
+      moqViolations.push({ category: group.category, moq: group.moq, total });
+    }
+  }
+
+  const renderCard = (item: FoodMenuItem, groupTotal: number) => {
     const qty = state.foodSelections[item.key] ?? 0;
     const cost = itemCost(item);
     return (
@@ -448,85 +488,207 @@ function FoodSelectionStep({
             overflow: "hidden",
             transition: "box-shadow 0.2s",
             boxShadow: qty > 0 ? 3 : 0,
+            height: "100%",
           }}
         >
-          <Box
-            sx={{
-              bgcolor: item.bg,
-              height: 100,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 52,
-              userSelect: "none",
-              position: "relative",
-            }}
-          >
-            {item.emoji}
-            {item.shared && (
-              <Chip
-                label="Shareable"
-                size="small"
-                color="success"
-                sx={{ position: "absolute", top: 8, right: 8, fontWeight: 700, fontSize: "0.65rem" }}
-              />
+          <Box sx={{ display: "flex", minHeight: 160 }}>
+            {/* Left: emoji + name + price + stepper */}
+            <Box
+              sx={{
+                bgcolor: item.bg,
+                p: 1.5,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "space-between",
+                minWidth: 130,
+                maxWidth: 130,
+                gap: 1,
+              }}
+            >
+              {item.shared && (
+                <Chip
+                  label="Shareable"
+                  size="small"
+                  color="success"
+                  sx={{ fontWeight: 700, fontSize: "0.6rem", height: 18 }}
+                />
+              )}
+              <Typography sx={{ fontSize: 44, userSelect: "none", lineHeight: 1 }}>
+                {item.emoji}
+              </Typography>
+              <Box sx={{ textAlign: "center" }}>
+                <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>
+                  {item.label}
+                </Typography>
+                <Typography variant="caption" fontWeight={700} color="secondary.dark" display="block" sx={{ mt: 0.5 }}>
+                  {item.priceLabel}
+                </Typography>
+              </Box>
+              <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0.5 }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  <IconButton size="small" onClick={() => setQty(item.key, -item.step, item, groupTotal)} disabled={qty === 0}>
+                    <Remove fontSize="small" />
+                  </IconButton>
+                  <Typography variant="h6" sx={{ minWidth: 28, textAlign: "center", fontWeight: 700 }}>
+                    {qty}
+                  </Typography>
+                  <IconButton size="small" onClick={() => setQty(item.key, item.step, item, groupTotal)}>
+                    <Add fontSize="small" />
+                  </IconButton>
+                </Box>
+                {qty > 0 && (
+                  <Chip size="small" label={`₹${cost.toLocaleString("en-IN")}`} color="secondary" />
+                )}
+              </Box>
+            </Box>
+            {/* Right: description + image strip */}
+            {item.note && (
+              <Box
+                sx={{
+                  flex: 1,
+                  p: 1.5,
+                  borderLeft: "1px solid",
+                  borderColor: "divider",
+                  overflowY: "auto",
+                  maxHeight: 200,
+                }}
+              >
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ whiteSpace: "pre-wrap", lineHeight: 1.7, display: "block" }}
+                >
+                  {item.note}
+                </Typography>
+                {item.images.length > 0 && (
+                  <Stack direction="row" spacing={0.75} sx={{ mt: 1 }}>
+                    {item.images.slice(0, 3).map((img, idx) => (
+                      <Box
+                        key={`${item.key}-img-${idx}`}
+                        component="img"
+                        src={img}
+                        alt={`${item.label} ${idx + 1}`}
+                        sx={{ width: 56, height: 42, objectFit: "cover", borderRadius: 1, border: "1px solid", borderColor: "divider" }}
+                      />
+                    ))}
+                  </Stack>
+                )}
+              </Box>
             )}
           </Box>
-          <CardContent sx={{ pt: 1.5, pb: "12px !important" }}>
-            <Typography variant="subtitle2" fontWeight={700} gutterBottom>
-              {item.label}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-              {item.note}
-            </Typography>
-            <Typography variant="body2" fontWeight={700} color="secondary.dark" sx={{ mb: 1.5 }}>
-              {item.priceLabel}
-            </Typography>
-            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                <IconButton size="small" onClick={() => setQty(item.key, -item.step, item.step)} disabled={qty === 0}>
-                  <Remove fontSize="small" />
-                </IconButton>
-                <Typography variant="h6" sx={{ minWidth: 32, textAlign: "center", fontWeight: 700 }}>
-                  {qty}
-                </Typography>
-                <IconButton size="small" onClick={() => setQty(item.key, item.step, item.step)}>
-                  <Add fontSize="small" />
-                </IconButton>
-              </Box>
-              {qty > 0 && (
-                <Chip size="small" label={`₹${cost.toLocaleString("en-IN")}`} color="secondary" />
-              )}
-            </Box>
-          </CardContent>
         </Card>
       </Grid>
     );
   };
+
+  const renderGroup = (group: CategoryGroup) => {
+    const groupTotal = group.items.reduce((s, m) => s + (state.foodSelections[m.key] ?? 0), 0);
+    const isSolo = group.items.length === 1;
+    const moqMet = groupTotal === 0 || groupTotal >= group.moq;
+
+    return (
+      <Box key={group.category} sx={{ mb: 3 }}>
+        {!isSolo && (
+          <Box
+            sx={{
+              display: "flex", alignItems: "center", gap: 1, mb: 1.5,
+              px: 1.5, py: 0.75, borderRadius: 2,
+              bgcolor: moqMet ? "background.default" : "warning.light",
+              border: "1px solid",
+              borderColor: moqMet ? "divider" : "warning.main",
+            }}
+          >
+            <Typography variant="subtitle2" fontWeight={700} sx={{ flex: 1 }}>
+              {group.category}
+            </Typography>
+            <Chip
+              size="small"
+              label={`Min. ${group.moq} heads combined`}
+              color={moqMet ? "default" : "warning"}
+              variant={moqMet ? "outlined" : "filled"}
+            />
+            {groupTotal > 0 && (
+              <Chip
+                size="small"
+                label={`${groupTotal} selected`}
+                color={moqMet ? "success" : "warning"}
+              />
+            )}
+          </Box>
+        )}
+        {isSolo && group.moq > 1 && (
+          <Typography variant="caption" color="text.secondary" sx={{ mb: 0.75, display: "block", pl: 0.5 }}>
+            Min. order: {group.moq}
+          </Typography>
+        )}
+        <Grid container spacing={2}>
+          {group.items.map((item) => renderCard(item, groupTotal))}
+        </Grid>
+        {!isSolo && groupTotal > 0 && !moqMet && (
+          <Alert severity="warning" sx={{ mt: 1, py: 0.5 }}>
+            Add {group.moq - groupTotal} more head{group.moq - groupTotal !== 1 ? "s" : ""} to meet the minimum of {group.moq} for <strong>{group.category}</strong>.
+          </Alert>
+        )}
+      </Box>
+    );
+  };
+
+  if (loadingFood) {
+    return (
+      <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (foodMenu.length === 0) {
+    return (
+      <Box sx={{ textAlign: "center", py: 6 }}>
+        <Typography color="text.secondary">No food items available at this time.</Typography>
+      </Box>
+    );
+  }
 
   return (
     <Box>
       <Alert severity="info" sx={{ mb: 3 }}>
         <strong>Personal items</strong> are individual servings per head and not shareable.
         {" "}<strong>Shareable items</strong> are ordered by quantity and enjoyed by the group.
+        {" "}Items grouped under the same category share a combined minimum order quantity (MOQ).
       </Alert>
 
       <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>🍽️ Personal Items (per head)</Typography>
-      <Grid container spacing={2} sx={{ mb: 4 }}>
-        {personalItems.map(renderCard)}
-      </Grid>
+      {personalGroups.map(renderGroup)}
 
-      <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>🤝 Shareable Items</Typography>
-      <Grid container spacing={2}>
-        {shareableItems.map(renderCard)}
-      </Grid>
+      {shareableGroups.length > 0 && (
+        <>
+          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5, mt: 2 }}>🤝 Shareable Items</Typography>
+          {shareableGroups.map(renderGroup)}
+        </>
+      )}
+
+      {moqViolations.length > 0 && (
+        <Alert severity="info" sx={{ mt: 2 }}>
+          <strong>Note:</strong> The following selections are below the minimum order quantity and will <strong>not be included</strong> when you proceed:{" "}
+          {moqViolations.map((v) => `${v.category} (${v.total} of ${v.moq} minimum)`).join(", ")}.
+          Add more to meet the minimum, or remove them entirely.
+        </Alert>
+      )}
 
       {totalItems > 0 && (
-        <Alert severity="success" sx={{ mt: 3 }}>
+        <Alert severity="success" sx={{ mt: 2 }}>
           <strong>{totalItems} item{totalItems > 1 ? "s" : ""}</strong> selected · estimated food total:{" "}
           <strong>₹{totalCost.toLocaleString("en-IN")}</strong>. The team will confirm availability before your event.
         </Alert>
       )}
+
+      <Alert severity="info" icon={false} sx={{ mt: 2, bgcolor: "background.default", border: "1px solid", borderColor: "divider" }}>
+        <Typography variant="body2" fontWeight={700} gutterBottom>Special Food Requests</Typography>
+        <Typography variant="body2" color="text.secondary">
+          For any specific food items, please contact the Dspire Team. We will make every effort to accommodate your preferences, subject to availability through our partnered vendors.
+        </Typography>
+      </Alert>
     </Box>
   );
 }
@@ -594,7 +756,7 @@ function FavorsStep({
 
 // ─── Step 7 ───────────────────────────────────────────────────────────────────
 function OrderReviewStep({
-  state, priceBreakdown, catalogItems, venue, loadingPrice, foodSubtotal,
+  state, priceBreakdown, catalogItems, venue, loadingPrice, foodSubtotal, foodMenu,
 }: {
   state: BookingState;
   priceBreakdown: PriceBreakdownType | null;
@@ -602,13 +764,14 @@ function OrderReviewStep({
   venue: Venue | null;
   loadingPrice: boolean;
   foodSubtotal: number;
+  foodMenu: FoodMenuItem[];
 }) {
   const formatDate = () => state.date ? state.date.format("DD MMM YYYY") : "";
   const formatTime = () => state.startTime ? state.startTime.format("hh:mm A") + " IST" : "";
   const formatEndTime = () => state.startTime ? state.startTime.add(state.durationHours, "hour").format("hh:mm A") + " IST" : "";
   const selectedAddons = catalogItems.filter((c) => state.addons.includes(c.id));
   const selectedFavors = catalogItems.filter((c) => (state.favors[c.id] ?? 0) > 0);
-  const selectedFood = FOOD_MENU.filter((m) => (state.foodSelections[m.key] ?? 0) > 0);
+  const selectedFood = foodMenu.filter((m) => (state.foodSelections[m.key] ?? 0) > 0);
 
   return (
     <Grid container spacing={3}>
@@ -1062,6 +1225,8 @@ export default function BookingFlow() {
   const [activeStep, setActiveStep] = useState(0);
   const [venue, setVenue] = useState<Venue | null>(null);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const [foodMenu, setFoodMenu] = useState<FoodMenuItem[]>([]);
+  const [loadingFood, setLoadingFood] = useState(true);
   const [loadingData, setLoadingData] = useState(true);
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -1092,7 +1257,7 @@ export default function BookingFlow() {
   const patchState = (patch: Partial<BookingState>) =>
     setBookingState((prev) => ({ ...prev, ...patch }));
 
-  const foodSubtotal = FOOD_MENU.reduce((sum, m) => {
+  const foodSubtotal = foodMenu.reduce((sum, m) => {
     const qty = bookingState.foodSelections[m.key] ?? 0;
     return sum + (m.step > 1 ? (qty / m.step) * m.price : m.price * qty);
   }, 0);
@@ -1134,6 +1299,15 @@ export default function BookingFlow() {
       setCatalogItems(cRes.data);
       setBookingState((prev) => ({ ...prev, durationHours: Math.max(prev.durationHours, vRes.data.min_hours) }));
     }).finally(() => setLoadingData(false));
+  }, []);
+
+  // Load food menu from backend
+  useEffect(() => {
+    setLoadingFood(true);
+    api.get<CatalogItem[]>("/catalog?type=food_item&active_only=true")
+      .then((r) => setFoodMenu(r.data.map(toFoodMenuItem)))
+      .catch(() => setFoodMenu([]))
+      .finally(() => setLoadingFood(false));
   }, []);
 
   // Load available slots when date or duration changes
@@ -1227,10 +1401,10 @@ export default function BookingFlow() {
           notes: Object.entries(bookingState.foodSelections)
             .filter(([, qty]) => qty > 0)
             .map(([key, qty]) => {
-              const item = FOOD_MENU.find((m) => m.key === key);
+              const item = foodMenu.find((m) => m.key === key);
               if (!item) return null;
               const cost = item.step > 1 ? (qty / item.step) * item.price : item.price * qty;
-              return `${item.label} × ${qty} (₹${cost})`;
+              return `${item.label} \u00d7 ${qty} (\u20b9${cost})`;
             })
             .filter(Boolean)
             .join(", ") || undefined,
@@ -1361,7 +1535,7 @@ export default function BookingFlow() {
       case 4:
         return <FoodCourtStep venue={venue} state={bookingState} setState={patchState} estimatedGuests={guestDetails.estimatedGuests} />;
       case 5:
-        return <FoodSelectionStep state={bookingState} setState={patchState} />;
+        return <FoodSelectionStep state={bookingState} setState={patchState} foodMenu={foodMenu} loadingFood={loadingFood} />;
       case 6:
         return <FavorsStep catalogItems={catalogItems} state={bookingState} setState={patchState} />;
       case 7:
@@ -1373,6 +1547,7 @@ export default function BookingFlow() {
             venue={venue}
             loadingPrice={loadingPrice}
             foodSubtotal={foodSubtotal}
+            foodMenu={foodMenu}
           />
         );
       case 8:
@@ -1402,6 +1577,20 @@ export default function BookingFlow() {
     if (activeStep === 0 && user) {
       setActiveStep(2);
       return;
+    }
+    // Food Selection step (5): drop any category whose combined qty < MOQ
+    if (activeStep === 5) {
+      const allGroups = buildCategoryGroups(foodMenu);
+      const cleaned = { ...bookingState.foodSelections };
+      for (const group of allGroups) {
+        const total = group.items.reduce((s, m) => s + (cleaned[m.key] ?? 0), 0);
+        if (total > 0 && total < group.moq) {
+          for (const item of group.items) {
+            delete cleaned[item.key];
+          }
+        }
+      }
+      patchState({ foodSelections: cleaned });
     }
     setActiveStep((s) => Math.min(s + 1, STEPS.length - 1));
   };

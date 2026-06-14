@@ -2,7 +2,7 @@
 
 export type UserRole = "user" | "admin";
 export type BookingStatus = "draft" | "confirmed" | "cancelled";
-export type ItemType = "service_addon" | "favor_essential";
+export type ItemType = "service_addon" | "favor_essential" | "food_item";
 export type PriceType = "fixed" | "per_hour" | "per_unit";
 export type TableRateType = "fixed_per_event" | "per_hour";
 
@@ -38,6 +38,40 @@ export interface CatalogItem {
   price: number;
   active: boolean;
   sort_order: number;
+  // Food-item specific fields
+  emoji?: string | null;
+  shared?: boolean | null;
+  step?: number | null;
+  bg_color?: string | null;
+  price_label?: string | null;
+  thumbnail_url?: string | null;
+  image_url_2?: string | null;
+  image_url_3?: string | null;
+  category?: string | null;
+  min_order_qty?: number;
+}
+
+/** Normalised food menu item — derived from CatalogItem with type === 'food_item' */
+export interface FoodMenuItem {
+  /** String key used in foodSelections state (String(id)) */
+  key: string;
+  id: number;
+  label: string;
+  note: string;
+  price: number;
+  priceLabel: string;
+  emoji: string;
+  bg: string;
+  shared: boolean;
+  step: number;
+  active: boolean;
+  sort_order: number;
+  /** All uploaded images (up to 3), slot 1 first */
+  images: string[];
+  /** Category name — items sharing the same category have a combined MOQ */
+  category: string;
+  /** Minimum order quantity for this category (combined across all category items) */
+  moq: number;
 }
 
 // Slots are returned as plain "HH:MM" strings from the backend

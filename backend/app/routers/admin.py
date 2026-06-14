@@ -1,5 +1,9 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import os
+import uuid
+import shutil
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -148,9 +152,59 @@ def admin_delete_catalog_item(
     db.commit()
 
 
-# ---------------------------------------------------------------------------
-# Availability Rules
-# ---------------------------------------------------------------------------
+_MEDIA_DIR = Path(__file__).parent.parent.parent / "media" / "food"
+_ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB
+_SLOT_COLUMNS = {1: "thumbnail_url", 2: "image_url_2", 3: "image_url_3"}
+
+
+@router.post("/catalog/{item_id}/upload-image/{slot}", response_model=CatalogItemOut)
+async def admin_upload_food_image(
+    item_id: int,
+    slot: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_admin_user),
+):
+    if slot not in _SLOT_COLUMNS:
+        raise HTTPException(400, "slot must be 1, 2, or 3")
+    item = db.get(CatalogItem, item_id)
+    if not item:
+        raise HTTPException(404, "Item not found")
+    if file.content_type not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(400, f"Unsupported image type: {file.content_type}. Allowed: jpeg, png, webp, gif")
+
+    content = await file.read()
+    if len(content) > _MAX_IMAGE_BYTES:
+        raise HTTPException(400, "Image exceeds 5 MB limit")
+
+    _MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower() if "." in (file.filename or "") else "jpg"
+    filename = f"{item_id}_s{slot}_{uuid.uuid4().hex[:8]}.{ext}"
+    dest = _MEDIA_DIR / filename
+
+    col = _SLOT_COLUMNS[slot]
+    old_url = getattr(item, col, None)
+    if old_url and old_url.startswith("/media/food/"):
+        old_path = Path(__file__).parent.parent.parent / old_url.lstrip("/")
+        old_path.unlink(missing_ok=True)
+
+    dest.write_bytes(content)
+    setattr(item, col, f"/media/food/{filename}")
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+# Keep backward-compat alias (used by older frontend code)
+@router.post("/catalog/{item_id}/upload-thumbnail", response_model=CatalogItemOut)
+async def admin_upload_food_thumbnail_compat(
+    item_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_admin_user),
+):
+    return await admin_upload_food_image(item_id, 1, file, db, admin)
 
 @router.get("/availability-rules", response_model=List[AvailabilityRuleOut])
 def admin_list_rules(
@@ -411,4 +465,57 @@ def delete_admin_note(
         raise HTTPException(404, "Note not found")
     db.delete(note)
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Cash Payment
+# ---------------------------------------------------------------------------
+
+class _CashPaymentPayload(_BaseModel):
+    cash_amount: float
+
+
+@router.patch("/bookings/{booking_id}/cash-payment", response_model=BookingOutWithPayments)
+def admin_record_cash_payment(
+    booking_id: int,
+    payload: _CashPaymentPayload,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_admin_user),
+):
+    """Record a cash payment against a booking and update Razorpay invoice notes."""
+    from ..models import Payment, PaymentStatus
+    from ..core.razorpay import patch_invoice_notes
+
+    if payload.cash_amount <= 0:
+        raise HTTPException(400, "Cash amount must be greater than zero")
+
+    booking = db.get(Booking, booking_id)
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+
+    # Persist the cash payment record
+    payment = Payment(
+        booking_id=booking_id,
+        amount=round(payload.cash_amount, 2),
+        status=PaymentStatus.completed,
+        payment_ref="CASH",
+        notes=f"Cash collected by {current_admin.email}",
+    )
+    db.add(payment)
+    db.commit()
+    db.refresh(payment)
+
+    # Update Razorpay invoice notes for both event and food invoices
+    razorpay_notes = {
+        "payment_mode": "cash",
+        "cash_received_by": current_admin.email,
+        "collection_status": "received",
+    }
+    if booking.razorpay_invoice_id:
+        patch_invoice_notes(booking.razorpay_invoice_id, razorpay_notes)
+    if booking.razorpay_food_invoice_id:
+        patch_invoice_notes(booking.razorpay_food_invoice_id, razorpay_notes)
+
+    db.refresh(booking)
+    return serialize_booking_with_payments(booking)
 

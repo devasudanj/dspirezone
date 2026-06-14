@@ -27,6 +27,7 @@ class BookingStatus(str, enum.Enum):
 class ItemType(str, enum.Enum):
     service_addon = "service_addon"
     favor_essential = "favor_essential"
+    food_item = "food_item"
 
 
 class PriceType(str, enum.Enum):
@@ -101,6 +102,18 @@ class CatalogItem(Base):
     price = Column(Float, nullable=False)
     active = Column(Boolean, default=True)
     sort_order = Column(Integer, default=0)
+    # Food-item specific fields (null for non-food catalog items)
+    emoji = Column(String(20), nullable=True)
+    shared = Column(Boolean, default=False, nullable=True)
+    step = Column(Integer, default=1, nullable=True)
+    bg_color = Column(String(50), nullable=True)
+    price_label = Column(String(100), nullable=True)
+    thumbnail_url = Column(String(500), nullable=True)
+    image_url_2 = Column(String(500), nullable=True)
+    image_url_3 = Column(String(500), nullable=True)
+    # Food item category (groups items for shared MOQ) — null means standalone
+    category = Column(String(100), nullable=True)
+    min_order_qty = Column(Integer, default=10, nullable=False)
 
     booking_line_items = relationship("BookingLineItem", back_populates="catalog_item")
 

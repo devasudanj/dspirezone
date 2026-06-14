@@ -23,8 +23,45 @@ import type {
   Venue, CatalogItem, AvailableSlot, PriceBreakdown as PriceBreakdownType,
   BookingWithPayments, BookingLineItem, Payment, BookingAuditLog, SplitInvoiceOut,
 } from "../types";
+import type { FoodMenuItem } from "../types";
 
-// ─── Food menu (must exactly mirror BookingFlow.tsx) ─────────────────────────
+// ─── Normalize catalog food_item to FoodMenuItem ─────────────────────────────────
+function toFoodMenuItem(item: import("../types").CatalogItem): FoodMenuItem {
+  return {
+    key: String(item.id),
+    id: item.id,
+    label: item.name,
+    note: item.description ?? "",
+    price: item.price,
+    priceLabel: item.price_label ?? `\u20b9${item.price} per ${item.unit_label ?? "item"}`,
+    emoji: item.emoji ?? "\u{1f37d}\ufe0f",
+    bg: item.bg_color ?? "#f5f5f5",
+    shared: item.shared ?? false,
+    step: item.step ?? 1,
+    active: item.active,
+    sort_order: item.sort_order,
+    images: [item.thumbnail_url, item.image_url_2, item.image_url_3].filter((u): u is string => !!u),
+    category: item.category ?? item.name,
+    moq: item.min_order_qty ?? 10,
+  };
+}
+
+/** Parse food selections from booking notes, matched against the live food menu. */
+function parseFoodSelectionsFromNotes(
+  notes: string | null | undefined,
+  menu: FoodMenuItem[]
+): Record<string, number> {
+  if (!notes || menu.length === 0) return {};
+  const result: Record<string, number> = {};
+  for (const item of menu) {
+    const escapedLabel = item.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = notes.match(new RegExp(`${escapedLabel}\\s*[\u00d7x]\\s*(\\d+)`, "i"));
+    if (match) {
+      result[item.key] = parseInt(match[1], 10);
+    }
+  }
+  return result;
+}────
 
 // ─── Razorpay types & script loader ──────────────────────────────────────────
 interface RazorpayOrderOut {
@@ -66,34 +103,6 @@ function loadRazorpayScript(): Promise<void> {
   });
 }
 
-const FOOD_MENU = [
-  { key: "pizza_chicken",         label: "Personal Pizza – Chicken",    note: "Personal size · not shareable",      price: 199, priceLabel: "₹199 per item",         emoji: "🍕", bg: "#fff3e0", shared: false, step: 1  },
-  { key: "pizza_veg",             label: "Personal Pizza – Veg",        note: "Personal size · not shareable",      price: 179, priceLabel: "₹179 per item",         emoji: "🍕", bg: "#f1f8e9", shared: false, step: 1  },
-  { key: "mutton_biryani_kids",   label: "Mutton Biryani – Kids",       note: "Kids portion · per head",            price: 249, priceLabel: "₹249 per head",         emoji: "🍚", bg: "#fce4ec", shared: false, step: 1  },
-  { key: "mutton_biryani_adult",  label: "Mutton Biryani – Adult",      note: "Full adult portion · per head",      price: 349, priceLabel: "₹349 per head",         emoji: "🍛", bg: "#fce4ec", shared: false, step: 1  },
-  { key: "chicken_biryani_kids",  label: "Chicken Biryani – Kids",      note: "Kids portion · per head",            price: 199, priceLabel: "₹199 per head",         emoji: "🍚", bg: "#e8f5e9", shared: false, step: 1  },
-  { key: "chicken_biryani_adult", label: "Chicken Biryani – Adult",     note: "Full adult portion · per head",      price: 299, priceLabel: "₹299 per head",         emoji: "🍛", bg: "#e8f5e9", shared: false, step: 1  },
-  { key: "veg_package",           label: "Veg Package",                 note: "Per head · includes rice & sides",   price: 149, priceLabel: "₹149 per head",         emoji: "🥗", bg: "#e8f5e9", shared: false, step: 1  },
-  { key: "large_pizza",           label: "Large Pizza",                 note: "Serves 3 people · shareable",        price: 599, priceLabel: "₹599 each (serves 3)",   emoji: "🍕", bg: "#fff3e0", shared: true,  step: 1  },
-  { key: "fish_fingers",          label: "Fish Fingers",                note: "Shareable · sold in packs of 10",    price: 299, priceLabel: "₹299 per 10 pcs",       emoji: "🐟", bg: "#e3f2fd", shared: true,  step: 10 },
-  { key: "chicken_nuggets",       label: "Chicken Nuggets",             note: "Shareable · sold in packs of 10",    price: 249, priceLabel: "₹249 per 10 pcs",       emoji: "🍗", bg: "#fff8e1", shared: true,  step: 10 },
-];
-
-/** Parse food selections out of the booking notes field. */
-function parseFoodSelectionsFromNotes(notes: string | null | undefined): Record<string, number> {
-  if (!notes) return {};
-  const result: Record<string, number> = {};
-  for (const item of FOOD_MENU) {
-    // Match "Label × N" pattern
-    const escapedLabel = item.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const match = notes.match(new RegExp(`${escapedLabel}\\s*[×x]\\s*(\\d+)`, "i"));
-    if (match) {
-      result[item.key] = parseInt(match[1], 10);
-    }
-  }
-  return result;
-}
-
 interface ModifyState {
   date: Dayjs | null;
   startTime: Dayjs | null;
@@ -112,7 +121,7 @@ interface ModifyState {
   discountPct: number;
 }
 
-function buildStateFromBooking(booking: BookingWithPayments, venueMinHours: number): ModifyState {
+function buildStateFromBooking(booking: BookingWithPayments, venueMinHours: number, menu: FoodMenuItem[] = []): ModifyState {
   const dateStr = booking.date;
   const startStr = booking.start_time;
   const endStr = booking.end_time;
@@ -140,7 +149,7 @@ function buildStateFromBooking(booking: BookingWithPayments, venueMinHours: numb
     foodcourtTablesCount: booking.foodcourt_tables_count,
     foodcourtTableNotes: booking.foodcourt_table_notes ?? "",
     extraRoomsCount: booking.extra_rooms_count,
-    foodSelections: parseFoodSelectionsFromNotes(booking.notes),
+    foodSelections: parseFoodSelectionsFromNotes(booking.notes, menu),
     favors,
     contactName: booking.contact_name ?? "",
     contactEmail: booking.contact_email ?? "",
@@ -164,6 +173,7 @@ export default function ModifyBookingFlow() {
   );
   const [venue, setVenue] = useState<Venue | null>(null);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const [foodMenu, setFoodMenu] = useState<FoodMenuItem[]>([]);
   const [loadingData, setLoadingData] = useState(!booking);
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -241,12 +251,37 @@ export default function ModifyBookingFlow() {
     }).finally(() => setLoadingData(false));
   }, []);
 
+  // Load food menu from backend
+  useEffect(() => {
+    api.get<CatalogItem[]>("/catalog?type=food_item&active_only=true")
+      .then((r) => setFoodMenu(r.data.map(toFoodMenuItem)))
+      .catch(() => setFoodMenu([]));
+  }, []);
+
+  // Load food menu from backend
+  useEffect(() => {
+    api.get<CatalogItem[]>("/catalog?type=food_item&active_only=true")
+      .then((r) => setFoodMenu(r.data.map(toFoodMenuItem)))
+      .catch(() => setFoodMenu([]));
+  }, []);
+
   // When booking loads after venue
   useEffect(() => {
     if (booking && venue && !state) {
-      setState(buildStateFromBooking(booking, venue.min_hours));
+      setState(buildStateFromBooking(booking, venue.min_hours, foodMenu));
     }
-  }, [booking, venue, state]);
+  }, [booking, venue, state, foodMenu]);
+
+  // Re-parse food selections once the food menu has loaded (initial parse used empty menu)
+  useEffect(() => {
+    if (booking && foodMenu.length > 0) {
+      const parsed = parseFoodSelectionsFromNotes(booking.notes, foodMenu);
+      if (Object.keys(parsed).length > 0) {
+        setState((prev) => prev ? { ...prev, foodSelections: parsed } : prev);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [foodMenu]);
 
   // Load available slots when date/duration changes
   const loadSlots = useCallback(async (date: Dayjs, duration: number, venueId: number) => {
@@ -304,7 +339,7 @@ export default function ModifyBookingFlow() {
     return () => clearTimeout(timer);
   }, [state?.date, state?.startTime, state?.durationHours, state?.foodcourtTablesCount, state?.extraRoomsCount, state?.addons, state?.favors, refreshPrice]);
 
-  const foodSubtotal = FOOD_MENU.reduce((sum, m) => {
+  const foodSubtotal = foodMenu.reduce((sum, m) => {
     const qty = state?.foodSelections[m.key] ?? 0;
     return sum + (m.step > 1 ? (qty / m.step) * m.price : m.price * qty);
   }, 0);
@@ -344,7 +379,7 @@ export default function ModifyBookingFlow() {
       ];
 
       // Rebuild notes including food items
-      const foodNoteLines = FOOD_MENU
+      const foodNoteLines = foodMenu
         .filter((m) => (state.foodSelections[m.key] ?? 0) > 0)
         .map((m) => {
           const qty = state.foodSelections[m.key];
@@ -763,32 +798,62 @@ export default function ModifyBookingFlow() {
           </AccordionSummary>
           <AccordionDetails>
             <Grid container spacing={2}>
-              {FOOD_MENU.map((item) => {
+              {foodMenu.map((item) => {
                 const qty = state.foodSelections[item.key] ?? 0;
                 const cost = item.step > 1 ? (qty / item.step) * item.price : item.price * qty;
+                const primaryImage = item.images[0];
                 return (
                   <Grid item xs={12} sm={6} key={item.key}>
-                    <Card variant="outlined" sx={{ borderRadius: 2, border: qty > 0 ? `2px solid ${BRAND.gold}` : "1px solid", borderColor: qty > 0 ? BRAND.gold : "divider" }}>
-                      <Box sx={{ bgcolor: item.bg, height: 80, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44, userSelect: "none" }}>
-                        {item.emoji}
-                      </Box>
-                      <CardContent sx={{ pt: 1.5, pb: "12px !important" }}>
-                        <Typography variant="subtitle2" fontWeight={700}>{item.label}</Typography>
-                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>{item.note}</Typography>
-                        <Typography variant="body2" fontWeight={700} color="secondary.dark" sx={{ mb: 1 }}>{item.priceLabel}</Typography>
-                        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                            <IconButton size="small" onClick={() => patchState({ foodSelections: { ...state.foodSelections, [item.key]: Math.max(0, qty - item.step) } })} disabled={qty === 0}>
-                              <Remove fontSize="small" />
-                            </IconButton>
-                            <Typography variant="h6" sx={{ minWidth: 32, textAlign: "center", fontWeight: 700 }}>{qty}</Typography>
-                            <IconButton size="small" onClick={() => patchState({ foodSelections: { ...state.foodSelections, [item.key]: qty + item.step } })}>
-                              <Add fontSize="small" />
-                            </IconButton>
+                    <Card variant="outlined" sx={{ borderRadius: 2, border: qty > 0 ? `2px solid ${BRAND.gold}` : "1px solid", borderColor: qty > 0 ? BRAND.gold : "divider", overflow: "hidden", height: "100%" }}>
+                      <Box sx={{ display: "flex", minHeight: 150 }}>
+                        {/* Left: thumbnail/emoji + name + price + stepper */}
+                        <Box sx={{ bgcolor: item.bg, p: 1.5, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", minWidth: 120, maxWidth: 120, gap: 1, position: "relative", overflow: "hidden" }}>
+                          {primaryImage && (
+                            <Box component="img" src={primaryImage} alt={item.label} sx={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} />
+                          )}
+                          {primaryImage && (
+                            <Box sx={{ position: "absolute", inset: 0, bgcolor: "rgba(0,0,0,0.32)" }} />
+                          )}
+                          <Typography sx={{ fontSize: 38, userSelect: "none", lineHeight: 1, position: "relative", zIndex: 1, filter: primaryImage ? "drop-shadow(0 1px 2px rgba(0,0,0,0.7))" : "none" }}>{item.emoji}</Typography>
+                          <Box sx={{ textAlign: "center", position: "relative", zIndex: 1 }}>
+                            <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2, color: primaryImage ? "white" : "inherit", textShadow: primaryImage ? "0 1px 3px rgba(0,0,0,0.8)" : "none" }}>{item.label}</Typography>
+                            <Typography variant="caption" fontWeight={700} color={primaryImage ? "rgba(255,255,255,0.9)" : "secondary.dark"} display="block" sx={{ mt: 0.5 }}>{item.priceLabel}</Typography>
                           </Box>
-                          {qty > 0 && <Chip size="small" label={`₹${cost.toLocaleString("en-IN")}`} color="secondary" />}
+                          <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0.5, position: "relative", zIndex: 1 }}>
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                              <IconButton size="small" onClick={() => patchState({ foodSelections: { ...state.foodSelections, [item.key]: Math.max(0, qty - item.step) } })} disabled={qty === 0} sx={{ bgcolor: primaryImage ? "rgba(255,255,255,0.2)" : undefined }}>
+                                <Remove fontSize="small" />
+                              </IconButton>
+                              <Typography variant="h6" sx={{ minWidth: 28, textAlign: "center", fontWeight: 700, color: primaryImage ? "white" : "inherit" }}>{qty}</Typography>
+                              <IconButton size="small" onClick={() => patchState({ foodSelections: { ...state.foodSelections, [item.key]: qty + item.step } })} sx={{ bgcolor: primaryImage ? "rgba(255,255,255,0.2)" : undefined }}>
+                                <Add fontSize="small" />
+                              </IconButton>
+                            </Box>
+                            {qty > 0 && <Chip size="small" label={`₹${cost.toLocaleString("en-IN")}`} color="secondary" />}
+                          </Box>
                         </Box>
-                      </CardContent>
+                        {/* Right: multiline description */}
+                        {item.note && (
+                          <Box sx={{ flex: 1, p: 1.5, borderLeft: "1px solid", borderColor: "divider", overflowY: "auto", maxHeight: 200 }}>
+                            <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "pre-wrap", lineHeight: 1.7, display: "block" }}>
+                              {item.note}
+                            </Typography>
+                            {item.images.length > 0 && (
+                              <Stack direction="row" spacing={0.75} sx={{ mt: 1 }}>
+                                {item.images.slice(0, 3).map((img, idx) => (
+                                  <Box
+                                    key={`${item.key}-img-${idx}`}
+                                    component="img"
+                                    src={img}
+                                    alt={`${item.label} ${idx + 1}`}
+                                    sx={{ width: 56, height: 42, objectFit: "cover", borderRadius: 1, border: "1px solid", borderColor: "divider" }}
+                                  />
+                                ))}
+                              </Stack>
+                            )}
+                          </Box>
+                        )}
+                      </Box>
                     </Card>
                   </Grid>
                 );

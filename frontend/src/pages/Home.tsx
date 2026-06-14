@@ -861,9 +861,16 @@ export default function Home() {
               Modify My Booking
             </Button>
             <Button
-              href="https://wa.me/919876543210"
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={() => {
+                const w = window as any;
+                if (w.AiSensy && typeof w.AiSensy.open === "function") {
+                  w.AiSensy.open();
+                } else if (w.$crisp) {
+                  w.$crisp.push(["do", "chat:open"]);
+                } else {
+                  window.open("https://wa.me/918065481150", "_blank", "noopener,noreferrer");
+                }
+              }}
               variant="contained"
               size="large"
               startIcon={<span style={{ fontSize: 20 }}>💬</span>}

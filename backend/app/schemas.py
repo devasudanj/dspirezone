@@ -84,6 +84,17 @@ class CatalogItemCreate(BaseModel):
     price: float
     active: bool = True
     sort_order: int = 0
+    # Food-item specific (ignored for other types)
+    emoji: Optional[str] = None
+    shared: bool = False
+    step: int = 1
+    bg_color: Optional[str] = None
+    price_label: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    image_url_2: Optional[str] = None
+    image_url_3: Optional[str] = None
+    category: Optional[str] = None
+    min_order_qty: Optional[int] = 10
 
 
 class CatalogItemUpdate(BaseModel):
@@ -95,6 +106,16 @@ class CatalogItemUpdate(BaseModel):
     price: Optional[float] = None
     active: Optional[bool] = None
     sort_order: Optional[int] = None
+    emoji: Optional[str] = None
+    shared: Optional[bool] = None
+    step: Optional[int] = None
+    bg_color: Optional[str] = None
+    price_label: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    image_url_2: Optional[str] = None
+    image_url_3: Optional[str] = None
+    category: Optional[str] = None
+    min_order_qty: Optional[int] = 10
 
 
 class CatalogItemOut(BaseModel):
@@ -107,6 +128,20 @@ class CatalogItemOut(BaseModel):
     price: float
     active: bool
     sort_order: int
+    emoji: Optional[str] = None
+    shared: Optional[bool] = False
+    step: Optional[int] = 1
+    bg_color: Optional[str] = None
+    price_label: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    image_url_2: Optional[str] = None
+    image_url_3: Optional[str] = None
+    category: Optional[str] = None
+    min_order_qty: int = 10
+
+    @property
+    def image_urls(self) -> list:
+        return [u for u in [self.thumbnail_url, self.image_url_2, self.image_url_3] if u]
 
     model_config = {"from_attributes": True}
 

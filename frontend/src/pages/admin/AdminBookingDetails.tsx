@@ -55,6 +55,12 @@ export default function AdminBookingDetails() {
   const [altSaved, setAltSaved] = useState(false);
   const [altError, setAltError] = useState("");
 
+  // Cash payment
+  const [cashAmount, setCashAmount] = useState("");
+  const [savingCash, setSavingCash] = useState(false);
+  const [cashSaved, setCashSaved] = useState(false);
+  const [cashError, setCashError] = useState("");
+
   // Email sending
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
@@ -172,6 +178,27 @@ export default function AdminBookingDetails() {
     }
   };
 
+  const handleRecordCash = async () => {
+    if (!bookingId) return;
+    const amount = parseFloat(cashAmount);
+    if (isNaN(amount) || amount <= 0) { setCashError("Enter a valid amount greater than 0."); return; }
+    setSavingCash(true);
+    setCashError("");
+    setCashSaved(false);
+    try {
+      const res = await api.patch<BookingWithPayments>(`/admin/bookings/${bookingId}/cash-payment`, {
+        cash_amount: amount,
+      });
+      setBooking(res.data);
+      setCashAmount("");
+      setCashSaved(true);
+    } catch (err) {
+      setCashError(err instanceof Error ? err.message : "Failed to record cash payment.");
+    } finally {
+      setSavingCash(false);
+    }
+  };
+
   const handleSendEmail = async () => {
     if (!bookingId) return;
     setSendingEmail(true);
@@ -257,7 +284,7 @@ export default function AdminBookingDetails() {
                       <Typography fontWeight={700}>₹{Number(booking.total_price).toLocaleString("en-IN")}</Typography>
                     </Box>
                     <Box>
-                      <Typography variant="body2" color="text.secondary">Paid</Typography>
+                      <Typography variant="body2" color="text.secondary">Paid (incl. cash)</Typography>
                       <Typography fontWeight={700} color="success.main">₹{Number(booking.total_paid).toLocaleString("en-IN")}</Typography>
                     </Box>
                     <Box>
@@ -272,6 +299,36 @@ export default function AdminBookingDetails() {
                   <Chip icon={<CheckCircle />} label="Fully Paid" color="success" variant="filled" sx={{ fontWeight: 700 }} />
                 )}
               </Stack>
+
+              {/* Cash payment input */}
+              {booking.remaining_due > 0 && (
+                <Box sx={{ mt: 2, pt: 2, borderTop: "1px solid", borderColor: "divider" }}>
+                  <Typography variant="subtitle2" fontWeight={700} gutterBottom>Record Cash Payment</Typography>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems="flex-start">
+                    <TextField
+                      label="Cash Amount Received (₹)"
+                      size="small"
+                      type="number"
+                      value={cashAmount}
+                      onChange={(e) => { setCashAmount(e.target.value); setCashSaved(false); setCashError(""); }}
+                      inputProps={{ min: 1, step: 1 }}
+                      sx={{ width: 240 }}
+                      placeholder={`Max ₹${Number(booking.remaining_due).toLocaleString("en-IN")}`}
+                    />
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={handleRecordCash}
+                      disabled={savingCash || !cashAmount}
+                      sx={{ bgcolor: "#15803d", "&:hover": { bgcolor: "#166534" }, minWidth: 160, height: 40 }}
+                    >
+                      {savingCash ? "Saving…" : "Record Cash Payment"}
+                    </Button>
+                  </Stack>
+                  {cashError && <Typography variant="body2" color="error" sx={{ mt: 0.75 }}>{cashError}</Typography>}
+                  {cashSaved && <Typography variant="body2" color="success.main" sx={{ mt: 0.75 }}>✓ Cash payment recorded and Razorpay invoice notes updated</Typography>}
+                </Box>
+              )}
             </Paper>
 
             {/* ── Modify Link + Send Email ── */}
@@ -410,9 +467,9 @@ export default function AdminBookingDetails() {
                     )}
                     <Divider sx={{ my: 0.5 }} />
                     <Typography><strong>Total:</strong> ₹{Number(booking.total_price).toLocaleString("en-IN")}</Typography>
-                    <Typography color="success.main"><strong>Paid:</strong> ₹{Number(booking.total_paid).toLocaleString("en-IN")}</Typography>
+                    <Typography color="success.main"><strong>Paid (incl. cash):</strong> ₹{Number(booking.total_paid).toLocaleString("en-IN")}</Typography>
                     <Typography color={booking.remaining_due > 0 ? "warning.dark" : "success.main"}>
-                      <strong>Remaining:</strong> ₹{Number(booking.remaining_due).toLocaleString("en-IN")}
+                      <strong>Remaining Balance:</strong> ₹{Number(booking.remaining_due).toLocaleString("en-IN")}
                     </Typography>
                   </Stack>
                 </Paper>
