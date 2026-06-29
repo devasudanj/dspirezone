@@ -25,6 +25,7 @@ const AdminCatalog = lazy(() => import("./pages/admin/AdminCatalog"));
 const AdminVenue = lazy(() => import("./pages/admin/AdminVenue"));
 const AdminDiscounts = lazy(() => import("./pages/admin/AdminDiscounts"));
 const AdminVRManagement = lazy(() => import("./pages/admin/AdminVRManagement"));
+const AdminNEXManagement = lazy(() => import("./pages/admin/AdminNEXManagement"));
 const DspireVRZone = lazy(() => import("./pages/DspireVRZone"));
 const Hiring = lazy(() => import("./pages/Hiring"));
 
@@ -122,6 +123,14 @@ export default function App() {
                 element={
                   <ProtectedRoute adminOnly>
                     <AdminVRManagement />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/nex-management"
+                element={
+                  <ProtectedRoute adminOnly>
+                    <AdminNEXManagement />
                   </ProtectedRoute>
                 }
               />

@@ -1,9 +1,18 @@
 from datetime import date, time, datetime
 from datetime import date as _Date, time as _Time  # aliases used where field name shadows type name
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, ValidationInfo
 
-from .models import UserRole, BookingStatus, ItemType, PriceType, TableRateType
+from .models import (
+    UserRole,
+    BookingStatus,
+    ItemType,
+    PriceType,
+    TableRateType,
+    NexGameStatus,
+    NexStationStatus,
+    NexSessionStatus,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -521,3 +530,107 @@ class DiscountValidateResponse(BaseModel):
     valid: bool
     discount_pct: float
     message: str
+
+
+# ---------------------------------------------------------------------------
+# NEX Playground
+# ---------------------------------------------------------------------------
+
+class NexGameOut(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    status: NexGameStatus
+    is_available: bool
+    station_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class NexGameListResponse(BaseModel):
+    items: List[NexGameOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class NexGameVisitCreate(BaseModel):
+    session_id: Optional[str] = None
+    source: Optional[str] = None
+    metadata: Optional[dict] = None
+
+
+class NexGameVisitOut(BaseModel):
+    id: int
+    game_id: int
+    user_id: Optional[int] = None
+    session_id: Optional[str] = None
+    source: Optional[str] = None
+    metadata: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class NexGameVisitResponse(BaseModel):
+    success: bool
+    visit_id: int
+
+
+class NexStationOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    status: NexStationStatus
+    is_available: bool
+    capabilities: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class NexSessionCreate(BaseModel):
+    game_id: int
+    station_id: int
+    participant_name: str
+    participant_count: int
+    start_at: datetime
+    end_at: datetime
+    notes: Optional[str] = None
+
+    @field_validator("participant_count")
+    @classmethod
+    def validate_participants(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("participant_count must be at least 1")
+        return value
+
+    @field_validator("end_at")
+    @classmethod
+    def validate_time_order(cls, value: datetime, info: ValidationInfo):
+        start_at = info.data.get("start_at")
+        if start_at and value <= start_at:
+            raise ValueError("end_at must be greater than start_at")
+        return value
+
+
+class NexSessionOut(BaseModel):
+    id: int
+    game_id: int
+    station_id: int
+    user_id: Optional[int] = None
+    participant_name: str
+    participant_count: int
+    start_at: datetime
+    end_at: datetime
+    status: NexSessionStatus
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    game: Optional[NexGameOut] = None
+    station: Optional[NexStationOut] = None
+
+    model_config = {"from_attributes": True}

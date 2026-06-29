@@ -67,6 +67,7 @@ export default function AdminDashboard() {
             { label: "Venue", href: "/admin/venue", icon: <Store />, color: "#16A34A" },
             { label: "Discount Codes", href: "/admin/discounts", icon: <LocalOffer />, color: BRAND.gold },
             { label: "VR Management", href: "/admin/vr-management", icon: <SportsEsports />, color: "#7C3AED" },
+            { label: "NEX Playground Games", href: "/admin/nex-management", icon: <SportsEsports />, color: "#0E7490" },
           ].map((nav) => (
             <Grid item xs={6} sm={3} key={nav.href}>
               <Card

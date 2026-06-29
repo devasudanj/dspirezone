@@ -862,14 +862,7 @@ export default function Home() {
             </Button>
             <Button
               onClick={() => {
-                const w = window as any;
-                if (w.AiSensy && typeof w.AiSensy.open === "function") {
-                  w.AiSensy.open();
-                } else if (w.$crisp) {
-                  w.$crisp.push(["do", "chat:open"]);
-                } else {
-                  window.open("https://wa.me/918065481150", "_blank", "noopener,noreferrer");
-                }
+                window.open("https://wa.me/918065481150", "_blank", "noopener,noreferrer");
               }}
               variant="contained"
               size="large"

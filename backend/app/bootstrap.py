@@ -7,6 +7,10 @@ from .models import (
     AvailabilityRule,
     CatalogItem,
     ItemType,
+    NexGame,
+    NexGameStatus,
+    NexStation,
+    NexStationStatus,
     PriceType,
     TableRateType,
     Venue,
@@ -200,6 +204,38 @@ def ensure_baseline_data() -> None:
         for item_data in baseline_items:
             if item_data["name"] not in existing_names:
                 db.add(CatalogItem(**item_data))
+
+        nex_station = db.query(NexStation).filter(NexStation.code == "NEX-A1").first()
+        if not nex_station:
+            nex_station = NexStation(
+                code="NEX-A1",
+                name="NEX Arena Station 1",
+                status=NexStationStatus.active,
+                is_available=True,
+                capabilities='{"modes":["party","kids"],"maxPlayers":10}',
+            )
+            db.add(nex_station)
+            db.flush()
+
+        if not db.query(NexGame).first():
+            db.add_all(
+                [
+                    NexGame(
+                        name="NEX Fruit Frenzy",
+                        description="Arcade slicing challenge tuned for family play.",
+                        status=NexGameStatus.active,
+                        is_available=True,
+                        station_id=nex_station.id,
+                    ),
+                    NexGame(
+                        name="NEX Rhythm Dash",
+                        description="High-energy cooperative rhythm experience.",
+                        status=NexGameStatus.active,
+                        is_available=True,
+                        station_id=nex_station.id,
+                    ),
+                ]
+            )
 
         db.commit()
     except Exception:

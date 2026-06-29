@@ -1,7 +1,7 @@
 import enum
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean, DateTime,
-    Date, Time, ForeignKey, Enum, Text
+    Date, Time, ForeignKey, Enum, Text, Index
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -46,6 +46,23 @@ class PaymentStatus(str, enum.Enum):
     completed = "completed"
     failed = "failed"
     refunded = "refunded"
+
+
+class NexGameStatus(str, enum.Enum):
+    active = "active"
+    inactive = "inactive"
+
+
+class NexStationStatus(str, enum.Enum):
+    active = "active"
+    inactive = "inactive"
+    maintenance = "maintenance"
+
+
+class NexSessionStatus(str, enum.Enum):
+    scheduled = "scheduled"
+    completed = "completed"
+    cancelled = "cancelled"
 
 
 # ---------------------------------------------------------------------------
@@ -271,3 +288,82 @@ class DiscountCode(Base):
     valid_from = Column(Date, nullable=True)
     valid_until = Column(Date, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class NexStation(Base):
+    __tablename__ = "nex_stations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(50), unique=True, nullable=False, index=True)
+    name = Column(String(150), nullable=False)
+    status = Column(Enum(NexStationStatus), default=NexStationStatus.active, nullable=False, index=True)
+    is_available = Column(Boolean, default=True, nullable=False)
+    capabilities = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    games = relationship("NexGame", back_populates="station")
+    sessions = relationship("NexSession", back_populates="station")
+
+
+class NexGame(Base):
+    __tablename__ = "nex_games"
+    __table_args__ = (
+        Index("ix_nex_games_status_station", "status", "station_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    status = Column(Enum(NexGameStatus), default=NexGameStatus.active, nullable=False, index=True)
+    is_available = Column(Boolean, default=True, nullable=False)
+    station_id = Column(Integer, ForeignKey("nex_stations.id"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    station = relationship("NexStation", back_populates="games")
+    sessions = relationship("NexSession", back_populates="game")
+    visits = relationship("NexGameVisit", back_populates="game")
+
+
+class NexSession(Base):
+    __tablename__ = "nex_sessions"
+    __table_args__ = (
+        Index("ix_nex_sessions_station_start_end", "station_id", "start_at", "end_at"),
+        Index("ix_nex_sessions_game_created", "game_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    game_id = Column(Integer, ForeignKey("nex_games.id"), nullable=False, index=True)
+    station_id = Column(Integer, ForeignKey("nex_stations.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    participant_name = Column(String(120), nullable=False)
+    participant_count = Column(Integer, nullable=False, default=1)
+    start_at = Column(DateTime(timezone=True), nullable=False)
+    end_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(Enum(NexSessionStatus), default=NexSessionStatus.scheduled, nullable=False, index=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    game = relationship("NexGame", back_populates="sessions")
+    station = relationship("NexStation", back_populates="sessions")
+    user = relationship("User")
+
+
+class NexGameVisit(Base):
+    __tablename__ = "nex_game_visits"
+    __table_args__ = (
+        Index("ix_nex_game_visits_game_created", "game_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    game_id = Column(Integer, ForeignKey("nex_games.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    session_id = Column(String(120), nullable=True, index=True)
+    source = Column(String(80), nullable=True)
+    metadata_json = Column("metadata", Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    game = relationship("NexGame", back_populates="visits")
+    user = relationship("User")
